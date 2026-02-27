@@ -1,0 +1,7 @@
+{
+  "name": "AstraDream: Celestial Journal",
+  "description": "A mystical dream journal that connects your subconscious to the cosmos using astrology, numerology, and AI.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
