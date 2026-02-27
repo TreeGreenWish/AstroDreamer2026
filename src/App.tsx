@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Moon, Book, User, Plus, Sparkles, Loader2, Trash2, ChevronLeft, Calendar, MapPin, Clock } from 'lucide-react';
 import { UserProfile, Dream } from './types';
@@ -66,6 +66,8 @@ export default function App() {
     try {
       // 1. Interpret dream
       const aiResponse = await interpretDream(dream, profile!);
+      if (!aiResponse) throw new Error("Failed to interpret dream");
+
       // 2. Generate image
       const imageUrl = await generateDreamImage(dream);
       
@@ -90,6 +92,8 @@ export default function App() {
         body: JSON.stringify(dreamWithAi)
       });
       
+      if (!res.ok) throw new Error("Failed to save dream to database");
+
       const { id } = await res.json();
       const savedDream = { ...dreamWithAi, id };
       
@@ -98,6 +102,7 @@ export default function App() {
       setActiveTab('library');
     } catch (error) {
       console.error('Failed to save dream:', error);
+      alert("The cosmos are currently clouded. Please try again in a moment.");
     } finally {
       setLoading(false);
     }
@@ -238,6 +243,10 @@ function Onboarding({ onSave, loading }: { onSave: (p: UserProfile) => void, loa
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.lob_name) {
+      alert("Please select a location from the dropdown");
+      return;
+    }
     onSave(formData);
   };
 
@@ -291,13 +300,10 @@ function Onboarding({ onSave, loading }: { onSave: (p: UserProfile) => void, loa
           </div>
           <div>
             <label className="block text-xs uppercase tracking-widest text-white/40 mb-1 ml-1">Birth Location</label>
-            <input 
-              required
-              type="text"
+            <LocationPicker 
               value={formData.lob_name}
-              onChange={e => setFormData({ ...formData, lob_name: e.target.value })}
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50 transition-colors"
-              placeholder="City, Country"
+              onChange={(name, lat, lng) => setFormData({ ...formData, lob_name: name, lob_lat: lat, lob_lng: lng })}
+              placeholder="Search city, country..."
             />
           </div>
           
@@ -323,11 +329,15 @@ function DreamJournal({ onSave, loading }: { onSave: (d: Dream) => void, loading
     time: format(new Date(), 'HH:mm'),
     location_lat: 0,
     location_lng: 0,
-    location_name: 'Current Location'
+    location_name: ''
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.location_name) {
+      alert("Please select a location for your dream to align it with the stars.");
+      return;
+    }
     onSave(formData);
   };
 
@@ -358,7 +368,7 @@ function DreamJournal({ onSave, loading }: { onSave: (d: Dream) => void, loading
             placeholder="Describe your dream in detail..."
           />
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-6 border-t border-white/5">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-6 border-t border-white/5">
             <div className="flex items-center gap-3 text-white/40">
               <Calendar className="w-4 h-4" />
               <input 
@@ -379,12 +389,11 @@ function DreamJournal({ onSave, loading }: { onSave: (d: Dream) => void, loading
             </div>
             <div className="flex items-center gap-3 text-white/40">
               <MapPin className="w-4 h-4" />
-              <input 
-                type="text"
+              <LocationPicker 
                 value={formData.location_name}
-                onChange={e => setFormData({ ...formData, location_name: e.target.value })}
-                className="bg-transparent text-sm focus:outline-none text-white/60 w-full"
-                placeholder="Location"
+                onChange={(name, lat, lng) => setFormData({ ...formData, location_name: name, location_lat: lat, location_lng: lng })}
+                placeholder="City, Country"
+                minimal
               />
             </div>
           </div>
@@ -604,7 +613,7 @@ function DreamDetail({ dream, onBack, onDelete, onUpdate }: { dream: Dream, onBa
               onChange={e => setEditData({ ...editData, content: e.target.value })}
               className="w-full bg-transparent text-white/80 focus:outline-none resize-none"
             />
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <input 
                 type="date"
                 value={editData.date}
@@ -616,6 +625,11 @@ function DreamDetail({ dream, onBack, onDelete, onUpdate }: { dream: Dream, onBa
                 value={editData.time}
                 onChange={e => setEditData({ ...editData, time: e.target.value })}
                 className="bg-white/5 p-3 rounded-xl text-white focus:outline-none"
+              />
+              <LocationPicker 
+                value={editData.location_name}
+                onChange={(name, lat, lng) => setEditData({ ...editData, location_name: name, location_lat: lat, location_lng: lng })}
+                placeholder="Location"
               />
             </div>
             <button 
@@ -641,8 +655,11 @@ function DreamDetail({ dream, onBack, onDelete, onUpdate }: { dream: Dream, onBa
             <div className="flex flex-wrap gap-3">
               <Tag label="Sun" value={dream.sun_sign} />
               <Tag label="Moon" value={dream.moon_sign} />
+              <Tag label="Mercury" value={dream.mercury_sign} />
               <Tag label="Venus" value={dream.venus_sign} />
               <Tag label="Mars" value={dream.mars_sign} />
+              <Tag label="Jupiter" value={dream.jupiter_sign} />
+              <Tag label="Saturn" value={dream.saturn_sign} />
               <Tag label="Phase" value={dream.moon_phase} />
               <Tag label="Day" value={dream.day_number?.toString()} />
             </div>
@@ -717,6 +734,97 @@ function Tag({ label, value }: { label: string, value?: string }) {
     <div className="bg-white/5 border border-white/10 px-3 py-1.5 rounded-full flex items-center gap-2">
       <span className="text-[9px] uppercase tracking-widest text-white/30 font-bold">{label}</span>
       <span className="text-xs text-white/80 font-medium">{value}</span>
+    </div>
+  );
+}
+
+function LocationPicker({ 
+  value, 
+  onChange, 
+  placeholder = "Search city...",
+  minimal = false
+}: { 
+  value: string, 
+  onChange: (name: string, lat: number, lng: number) => void,
+  placeholder?: string,
+  minimal?: boolean
+}) {
+  const [query, setQuery] = useState(value);
+  const [results, setResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (query.length > 2 && showDropdown) {
+        setSearching(true);
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`);
+          const data = await res.json();
+          setResults(data);
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setSearching(false);
+        }
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [query, showDropdown]);
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <input 
+        type="text"
+        value={query}
+        onChange={e => {
+          setQuery(e.target.value);
+          setShowDropdown(true);
+        }}
+        onFocus={() => setShowDropdown(true)}
+        className={cn(
+          "w-full focus:outline-none transition-colors",
+          minimal 
+            ? "bg-transparent text-sm text-white/60" 
+            : "bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-orange-500/50"
+        )}
+        placeholder={placeholder}
+      />
+      {showDropdown && (query.length > 2 || searching) && (
+        <div className="absolute bottom-full left-0 w-full mb-2 glass rounded-xl overflow-hidden z-[100] shadow-2xl border border-white/10 max-h-60 overflow-y-auto">
+          {searching ? (
+            <div className="p-4 flex justify-center"><Loader2 className="w-4 h-4 animate-spin text-orange-500" /></div>
+          ) : results.length > 0 ? (
+            results.map((r, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => {
+                  setQuery(r.display_name);
+                  onChange(r.display_name, parseFloat(r.lat), parseFloat(r.lon));
+                  setShowDropdown(false);
+                }}
+                className="w-full text-left px-4 py-3 text-sm text-white/70 hover:bg-white/10 hover:text-white transition-colors border-b border-white/5 last:border-0"
+              >
+                {r.display_name}
+              </button>
+            ))
+          ) : query.length > 2 && (
+            <div className="p-4 text-xs text-white/30 text-center">No locations found</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

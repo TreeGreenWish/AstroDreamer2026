@@ -48,6 +48,21 @@ db.exec(`
   );
 `);
 
+// Migration: Add missing columns if they don't exist
+const columns = db.prepare("PRAGMA table_info(dreams)").all() as any[];
+const columnNames = columns.map(c => c.name);
+const requiredColumns = [
+  "sun_sign", "moon_sign", "mercury_sign", "venus_sign", 
+  "mars_sign", "jupiter_sign", "saturn_sign", "moon_phase", "day_number"
+];
+
+requiredColumns.forEach(col => {
+  if (!columnNames.includes(col)) {
+    const type = col === "day_number" ? "INTEGER" : "TEXT";
+    db.exec(`ALTER TABLE dreams ADD COLUMN ${col} ${type}`);
+  }
+});
+
 async function startServer() {
   const app = express();
   const PORT = 3000;

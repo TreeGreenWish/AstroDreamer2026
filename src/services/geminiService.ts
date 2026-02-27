@@ -37,7 +37,9 @@ export async function generateProfileAnalysis(profile: UserProfile) {
     },
   });
 
-  return JSON.parse(response.text);
+  const text = response.text;
+  const cleanJson = text.replace(/```json|```/g, "").trim();
+  return JSON.parse(cleanJson);
 }
 
 export async function interpretDream(dream: Dream, userProfile: UserProfile) {
@@ -102,7 +104,9 @@ export async function interpretDream(dream: Dream, userProfile: UserProfile) {
     },
   });
 
-  return JSON.parse(response.text);
+  const text = response.text;
+  const cleanJson = text.replace(/```json|```/g, "").trim();
+  return JSON.parse(cleanJson);
 }
 
 export async function generateDreamImage(dream: Dream) {
