@@ -9,6 +9,17 @@ export interface UserProfile {
   life_path?: number;
   chinese_zodiac?: string;
   birth_chart_interpretation?: string;
+  sun_sign?: string;
+  moon_sign?: string;
+  mercury_sign?: string;
+  venus_sign?: string;
+  mars_sign?: string;
+  jupiter_sign?: string;
+  saturn_sign?: string;
+  uranus_sign?: string;
+  neptune_sign?: string;
+  pluto_sign?: string;
+  rising_sign?: string;
 }
 
 export interface Dream {
@@ -29,7 +40,24 @@ export interface Dream {
   mars_sign?: string;
   jupiter_sign?: string;
   saturn_sign?: string;
+  uranus_sign?: string;
+  neptune_sign?: string;
+  pluto_sign?: string;
   moon_phase?: string;
   day_number?: number;
+  planetary_influences?: {
+    sun: string;
+    moon: string;
+    mercury: string;
+    venus: string;
+    mars: string;
+    jupiter: string;
+    saturn: string;
+    uranus: string;
+    neptune: string;
+    pluto: string;
+  };
+  tags?: string[];
+  notes?: string;
   created_at?: string;
 }
