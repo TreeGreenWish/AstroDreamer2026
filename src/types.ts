@@ -22,6 +22,11 @@ export interface UserProfile {
   rising_sign?: string;
 }
 
+export interface NoteEntry {
+  content: string;
+  timestamp: string; // ISO string
+}
+
 export interface Dream {
   id?: number;
   title: string;
@@ -58,6 +63,6 @@ export interface Dream {
     pluto: string;
   };
   tags?: string[];
-  notes?: string;
+  notes?: NoteEntry[];
   created_at?: string;
 }

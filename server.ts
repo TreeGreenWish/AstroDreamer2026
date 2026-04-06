@@ -145,7 +145,8 @@ async function startServer() {
     const parsedDreams = dreams.map(d => ({
       ...d,
       planetary_influences: d.planetary_influences ? JSON.parse(d.planetary_influences) : null,
-      tags: d.tags ? JSON.parse(d.tags) : []
+      tags: d.tags ? JSON.parse(d.tags) : [],
+      notes: d.notes ? JSON.parse(d.notes) : []
     }));
     res.json(parsedDreams);
   });
@@ -166,7 +167,7 @@ async function startServer() {
     `).run(
       title, content, date, time, location_lat, location_lng, location_name, 
       interpretation, image_url, sun_sign, moon_sign, mercury_sign, 
-      venus_sign, mars_sign, jupiter_sign, saturn_sign, uranus_sign, neptune_sign, pluto_sign, moon_phase, day_number, JSON.stringify(planetary_influences), JSON.stringify(tags), notes
+      venus_sign, mars_sign, jupiter_sign, saturn_sign, uranus_sign, neptune_sign, pluto_sign, moon_phase, day_number, JSON.stringify(planetary_influences), JSON.stringify(tags), JSON.stringify(notes || [])
     );
     res.json({ id: result.lastInsertRowid });
   });
@@ -189,7 +190,7 @@ async function startServer() {
     `).run(
       title, content, date, time, location_lat, location_lng, location_name, 
       interpretation, image_url, sun_sign, moon_sign, mercury_sign, 
-      venus_sign, mars_sign, jupiter_sign, saturn_sign, uranus_sign, neptune_sign, pluto_sign, moon_phase, day_number, JSON.stringify(planetary_influences), JSON.stringify(tags), notes, id
+      venus_sign, mars_sign, jupiter_sign, saturn_sign, uranus_sign, neptune_sign, pluto_sign, moon_phase, day_number, JSON.stringify(planetary_influences), JSON.stringify(tags), JSON.stringify(notes || []), id
     );
     res.json({ success: true });
   });

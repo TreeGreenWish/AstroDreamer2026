@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Moon, Book, User, Plus, Sparkles, Loader2, Trash2, ChevronLeft, Calendar, MapPin, Clock, Activity, Search, X, Tag as TagIcon, BarChart3 } from 'lucide-react';
 import { UserProfile, Dream } from './types';
-import { generateProfileAnalysis, interpretDream, generateDreamImage, getCurrentAstrology, getMonthAstrologyEvents, generateInsights } from './services/geminiService';
+import { generateProfileAnalysis, interpretDream, generateDreamImage, getCurrentAstrology, getMonthAstrologyEvents, generateInsights, generateCreativePrompt } from './services/geminiService';
 import ReactMarkdown from 'react-markdown';
 import { format } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
@@ -215,7 +215,7 @@ export default function App() {
               transition={{ duration: 0.3 }}
             >
               {activeTab === 'journal' && <DreamJournal onSave={handleSaveDream} loading={loading} />}
-              {activeTab === 'feed' && <FeedView dreams={dreams} currentAstrology={currentAstrology} onSelect={setSelectedDream} />}
+              {activeTab === 'feed' && <FeedView dreams={dreams} currentAstrology={currentAstrology} onSelect={setSelectedDream} insights={insights} />}
               {activeTab === 'calendar' && <AstralCalendar dreams={dreams} events={monthlyEvents} onSelect={setSelectedDream} />}
               {activeTab === 'library' && <Library dreams={dreams} onSelect={setSelectedDream} />}
               {activeTab === 'insights' && <InsightsView dreams={dreams} insights={insights} setInsights={setInsights} />}
@@ -385,8 +385,11 @@ function DreamJournal({ onSave, loading }: { onSave: (d: Dream) => void, loading
     time: format(new Date(), 'HH:mm'),
     location_lat: 0,
     location_lng: 0,
-    location_name: ''
+    location_name: '',
+    notes: []
   });
+
+  const [initialNote, setInitialNote] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -394,7 +397,11 @@ function DreamJournal({ onSave, loading }: { onSave: (d: Dream) => void, loading
       alert("Please select a location for your dream to align it with the stars.");
       return;
     }
-    onSave(formData);
+    const dreamToSave = {
+      ...formData,
+      notes: initialNote ? [{ content: initialNote, timestamp: new Date().toISOString() }] : []
+    };
+    onSave(dreamToSave);
   };
 
   return (
@@ -428,8 +435,8 @@ function DreamJournal({ onSave, loading }: { onSave: (d: Dream) => void, loading
             <label className="text-[10px] uppercase tracking-widest text-white/30 ml-1">Personal Notes (Optional)</label>
             <textarea 
               rows={3}
-              value={formData.notes || ''}
-              onChange={e => setFormData({ ...formData, notes: e.target.value })}
+              value={initialNote}
+              onChange={e => setInitialNote(e.target.value)}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50 transition-colors text-sm"
               placeholder="Your initial ideas or notes..."
             />
@@ -579,12 +586,34 @@ function AstralCalendar({
 function FeedView({ 
   dreams, 
   currentAstrology, 
-  onSelect 
+  onSelect,
+  insights
 }: { 
   dreams: Dream[], 
   currentAstrology: any, 
-  onSelect: (d: Dream) => void 
+  onSelect: (d: Dream) => void,
+  insights: string[]
 }) {
+  const [creativePrompt, setCreativePrompt] = useState<{ prompt: string, dreamId: number | null, type: string } | null>(null);
+  const [promptLoading, setPromptLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchPrompt = async () => {
+      if (dreams.length > 0) {
+        setPromptLoading(true);
+        try {
+          const prompt = await generateCreativePrompt(dreams, insights);
+          setCreativePrompt(prompt);
+        } catch (error) {
+          console.error('Failed to fetch creative prompt:', error);
+        } finally {
+          setPromptLoading(false);
+        }
+      }
+    };
+    fetchPrompt();
+  }, [dreams.length, insights.length]);
+
   if (!currentAstrology) {
     return (
       <div className="flex flex-col items-center justify-center py-20 space-y-4">
@@ -701,6 +730,55 @@ function FeedView({
             <p className="text-white/30 text-sm italic">No dream was recorded yesterday. The stars wait for your next entry.</p>
           </div>
         )}
+      </div>
+
+      {/* Creative Writing Prompt */}
+      <div className="space-y-6">
+        <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+          <div className="p-2 bg-orange-500/10 rounded-lg text-orange-500">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <h3 className="text-xs uppercase tracking-[0.3em] text-white/50 font-bold">Creative Inspiration</h3>
+        </div>
+
+        {promptLoading ? (
+          <div className="glass p-12 rounded-3xl flex flex-col items-center justify-center gap-4">
+            <Loader2 className="w-6 h-6 animate-spin text-gold" />
+            <p className="text-white/30 text-xs font-mono uppercase tracking-widest">Generating creative prompt...</p>
+          </div>
+        ) : creativePrompt ? (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="glass p-8 rounded-3xl border-orange-500/20 relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+              <Sparkles className="w-24 h-24 text-gold" />
+            </div>
+            
+            <div className="relative z-10 space-y-4">
+              <span className="text-[10px] font-mono text-orange-500 uppercase tracking-widest block">Daily Exercise</span>
+              <h3 className="text-2xl font-serif text-white leading-tight">{creativePrompt.prompt}</h3>
+              
+              <div className="flex items-center gap-4 pt-4">
+                <button 
+                  onClick={() => {
+                    if (creativePrompt.dreamId) {
+                      const dream = dreams.find(d => d.id === creativePrompt.dreamId);
+                      if (dream) onSelect(dream);
+                    } else {
+                      // If it's a general symbol prompt, maybe go to insights or just library
+                      // For now, let's just show a message or do nothing
+                    }
+                  }}
+                  className="bg-orange-500/20 hover:bg-orange-500/30 text-orange-500 px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all"
+                >
+                  {creativePrompt.dreamId ? 'Go to Dream' : 'Inspired by Insights'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        ) : null}
       </div>
 
       {sections.map((section, idx) => (
@@ -966,6 +1044,7 @@ function DreamDetail({ dream, onBack, onDelete, onUpdate }: { dream: Dream, onBa
   const [selectedInfluence, setSelectedInfluence] = useState<{ planet: string, text: string } | null>(null);
   const [newTag, setNewTag] = useState('');
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const [newNoteContent, setNewNoteContent] = useState('');
 
   useEffect(() => {
     setEditData(dream);
@@ -1075,13 +1154,45 @@ function DreamDetail({ dream, onBack, onDelete, onUpdate }: { dream: Dream, onBa
 
             <div className="space-y-3">
               <label className="text-[10px] uppercase tracking-widest text-white/30 ml-1">Personal Notes</label>
-              <textarea 
-                rows={4}
-                value={editData.notes || ''}
-                onChange={e => setEditData({ ...editData, notes: e.target.value })}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50 transition-colors text-sm"
-                placeholder="Your ideas, notes, or creative writing..."
-              />
+              <div className="space-y-4">
+                {editData.notes?.map((note, idx) => (
+                  <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
+                    <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                      <span className="text-[10px] font-mono text-white/20 uppercase">
+                        {format(new Date(note.timestamp), 'MMM d, yyyy HH:mm')}
+                      </span>
+                      <button 
+                        onClick={() => {
+                          const updatedNotes = editData.notes?.filter((_, i) => i !== idx);
+                          setEditData({ ...editData, notes: updatedNotes });
+                        }}
+                        className="text-white/20 hover:text-red-500"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <textarea 
+                      value={note.content}
+                      onChange={e => {
+                        const updatedNotes = [...(editData.notes || [])];
+                        updatedNotes[idx] = { ...note, content: e.target.value };
+                        setEditData({ ...editData, notes: updatedNotes });
+                      }}
+                      className="w-full bg-transparent text-white/80 text-sm focus:outline-none resize-none"
+                      rows={2}
+                    />
+                  </div>
+                ))}
+                <button 
+                  onClick={() => {
+                    const updatedNotes = [...(editData.notes || []), { content: '', timestamp: new Date().toISOString() }];
+                    setEditData({ ...editData, notes: updatedNotes });
+                  }}
+                  className="w-full py-3 rounded-xl border border-dashed border-white/10 text-white/30 hover:text-white hover:bg-white/5 transition-all text-xs uppercase tracking-widest"
+                >
+                  + Add New Note Entry
+                </button>
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -1255,7 +1366,7 @@ function DreamDetail({ dream, onBack, onDelete, onUpdate }: { dream: Dream, onBa
                   <Book className="w-5 h-5 text-gold" />
                   <h3 className="text-xs uppercase tracking-[0.2em] text-gold font-semibold m-0">Personal Notes</h3>
                 </div>
-                {editData.notes !== dream.notes && (
+                {JSON.stringify(editData.notes) !== JSON.stringify(dream.notes) && (
                   <button 
                     onClick={async () => {
                       setIsSavingNote(true);
@@ -1270,12 +1381,50 @@ function DreamDetail({ dream, onBack, onDelete, onUpdate }: { dream: Dream, onBa
                   </button>
                 )}
               </div>
-              <textarea
-                value={editData.notes || ''}
-                onChange={(e) => setEditData({ ...editData, notes: e.target.value })}
-                placeholder="Type your own ideas, notes, or creative writing from the future into your dream..."
-                className="w-full bg-transparent text-white/70 text-sm leading-relaxed focus:outline-none min-h-[150px] resize-none placeholder:text-white/10"
-              />
+              
+              <div className="space-y-6">
+                {dream.notes && dream.notes.length > 0 ? (
+                  dream.notes.map((note, idx) => (
+                    <div key={idx} className="space-y-2 border-l border-gold/20 pl-4 py-1">
+                      <div className="flex items-center gap-2 text-[10px] font-mono text-white/20 uppercase tracking-widest">
+                        <Clock className="w-3 h-3" />
+                        {format(new Date(note.timestamp), 'MMM d, yyyy • HH:mm')}
+                      </div>
+                      <p className="text-white/70 text-sm leading-relaxed whitespace-pre-wrap">
+                        {note.content}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-white/20 text-sm italic">No personal notes yet.</p>
+                )}
+
+                <div className="pt-4 border-t border-white/5">
+                  <textarea
+                    value={newNoteContent}
+                    onChange={(e) => setNewNoteContent(e.target.value)}
+                    placeholder="Add a new note, idea, or creative writing entry..."
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white/70 text-sm leading-relaxed focus:outline-none min-h-[100px] resize-none placeholder:text-white/10 mb-4"
+                  />
+                  <button 
+                    onClick={async () => {
+                      if (!newNoteContent.trim()) return;
+                      setIsSavingNote(true);
+                      const updatedDream = {
+                        ...dream,
+                        notes: [...(dream.notes || []), { content: newNoteContent, timestamp: new Date().toISOString() }]
+                      };
+                      await onUpdate(updatedDream);
+                      setNewNoteContent('');
+                      setIsSavingNote(false);
+                    }}
+                    disabled={isSavingNote || !newNoteContent.trim()}
+                    className="bg-gold text-deep-blue px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest hover:scale-105 transition-all disabled:opacity-50 disabled:hover:scale-100"
+                  >
+                    {isSavingNote ? 'Saving...' : 'Add Entry'}
+                  </button>
+                </div>
+              </div>
             </div>
           </>
         )}

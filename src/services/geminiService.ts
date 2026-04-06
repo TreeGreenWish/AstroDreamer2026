@@ -319,3 +319,54 @@ export async function generateInsights(dreams: Dream[]) {
   const cleanJson = text.replace(/```json|```/g, "").trim();
   return JSON.parse(cleanJson);
 }
+
+export async function generateCreativePrompt(dreams: Dream[], insights: string[]) {
+  const dreamsSummary = dreams.map(d => ({
+    id: d.id,
+    title: d.title,
+    date: d.date,
+    tags: d.tags,
+  }));
+
+  const prompt = `
+    Act as a mystical creative writing coach.
+    Based on the user's past dreams and their current "Insights", generate a creative writing prompt.
+    
+    Insights:
+    ${JSON.stringify(insights)}
+    
+    Past Dreams:
+    ${JSON.stringify(dreamsSummary)}
+    
+    Task:
+    1. Select a recurring symbol (from insights) OR a dream from exactly one year ago (if one exists) OR a significant past dream.
+    2. Create a creative writing prompt (e.g., "Write a poem about the symbol of water", "Write a short story based on this dream you had one year ago").
+    3. If the prompt is based on a specific dream, provide its ID.
+    
+    Return the result in JSON format with the following keys:
+    prompt (string),
+    dreamId (number or null),
+    type (string: 'symbol' or 'anniversary' or 'past_dream')
+  `;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          prompt: { type: Type.STRING },
+          dreamId: { type: Type.NUMBER },
+          type: { type: Type.STRING },
+        },
+        required: ["prompt", "type"],
+      },
+    },
+  });
+
+  const text = response.text;
+  const cleanJson = text.replace(/```json|```/g, "").trim();
+  return JSON.parse(cleanJson);
+}
