@@ -27,6 +27,8 @@ export interface NoteEntry {
   timestamp: string; // ISO string
 }
 
+export type DreamEnrichmentStatus = 'raw' | 'interpreting' | 'interpreted' | 'image_failed' | 'complete';
+
 export interface Dream {
   id?: number;
   title: string;
@@ -64,5 +66,11 @@ export interface Dream {
   };
   tags?: string[];
   notes?: NoteEntry[];
+  enrichment_status?: DreamEnrichmentStatus;
+  interpreted_at?: string;
+  image_generated_at?: string;
+  interpretation_error?: string | null;
+  image_error?: string | null;
   created_at?: string;
+  updated_at?: string;
 }
