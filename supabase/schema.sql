@@ -1,6 +1,6 @@
 -- AstraDream hosted persistence schema for Supabase/Postgres.
--- Phase 1 remains single-user to preserve the current app behavior.
--- Authentication can later replace the singleton profile with auth.users ownership.
+-- Phase 1 remains single-user. Direct browser reads/writes are denied;
+-- the application server accesses these tables with a server-only service-role key.
 
 create table if not exists public.user_profiles (
   id bigint primary key check (id = 1),
@@ -58,15 +58,13 @@ create table if not exists public.dreams (
   updated_at timestamptz not null default now()
 );
 
-create index if not exists dreams_date_time_idx
-  on public.dreams (date desc, time desc);
-
-create index if not exists dreams_tags_gin_idx
-  on public.dreams using gin (tags);
+create index if not exists dreams_date_time_idx on public.dreams (date desc, time desc);
+create index if not exists dreams_tags_gin_idx on public.dreams using gin (tags);
 
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   new.updated_at = now();
@@ -75,28 +73,28 @@ end;
 $$;
 
 drop trigger if exists set_user_profiles_updated_at on public.user_profiles;
-create trigger set_user_profiles_updated_at
-before update on public.user_profiles
+create trigger set_user_profiles_updated_at before update on public.user_profiles
 for each row execute function public.set_updated_at();
 
 drop trigger if exists set_dreams_updated_at on public.dreams;
-create trigger set_dreams_updated_at
-before update on public.dreams
+create trigger set_dreams_updated_at before update on public.dreams
 for each row execute function public.set_updated_at();
 
--- The server uses the service-role key, so direct browser access is intentionally denied.
 alter table public.user_profiles enable row level security;
 alter table public.dreams enable row level security;
 
--- Public bucket for generated dream art. The database stores only the object URL,
--- not multi-megabyte base64 image data.
+grant select, insert, update, delete on table public.user_profiles to service_role;
+grant select, insert, update, delete on table public.dreams to service_role;
+grant usage, select on all sequences in schema public to service_role;
+
 insert into storage.buckets (id, name, public)
 values ('dream-images', 'dream-images', true)
 on conflict (id) do update set public = excluded.public;
 
--- Public read access is limited to dream-image objects. Uploads still happen through
--- the server using the service-role key.
+-- Generated dream images are intentionally public because the app displays their URLs.
+-- Upload/update/delete operations remain server-only via the service-role key.
 drop policy if exists "Public dream image reads" on storage.objects;
 create policy "Public dream image reads"
 on storage.objects for select
+to anon, authenticated
 using (bucket_id = 'dream-images');
