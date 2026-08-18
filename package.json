@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "migrate:sqlite:check": "tsx scripts/migrateSqliteToSupabase.ts",
+    "migrate:sqlite": "tsx scripts/migrateSqliteToSupabase.ts --execute"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
