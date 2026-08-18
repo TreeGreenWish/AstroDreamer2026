@@ -91,11 +91,85 @@ export async function generateDreamImage(dream: Dream) {
   return null;
 }
 
+const PLANETS = ["sun","moon","mercury","venus","mars","jupiter","saturn","uranus","neptune","pluto"] as const;
+const SIGNS = ["aries","taurus","gemini","cancer","leo","virgo","libra","scorpio","sagittarius","capricorn","aquarius","pisces"];
+
+type AspectName = "conjunction" | "sextile" | "square" | "trine" | "opposition";
+
+function normalizeSign(value?: string) {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return SIGNS.includes(normalized) ? normalized : null;
+}
+
+function signAspect(signA?: string, signB?: string): AspectName | null {
+  const a = normalizeSign(signA);
+  const b = normalizeSign(signB);
+  if (!a || !b) return null;
+  const ia = SIGNS.indexOf(a);
+  const ib = SIGNS.indexOf(b);
+  const raw = Math.abs(ia - ib);
+  const distance = Math.min(raw, 12 - raw);
+  if (distance === 0) return "conjunction";
+  if (distance === 2) return "sextile";
+  if (distance === 3) return "square";
+  if (distance === 4) return "trine";
+  if (distance === 6) return "opposition";
+  return null;
+}
+
+function deriveSignBasedAspects(dream: Dream) {
+  const aspects: Array<{ planet1: string; planet2: string; aspect: AspectName; sign1: string; sign2: string }> = [];
+  for (let i = 0; i < PLANETS.length; i++) {
+    for (let j = i + 1; j < PLANETS.length; j++) {
+      const p1 = PLANETS[i];
+      const p2 = PLANETS[j];
+      const sign1 = (dream as any)[`${p1}_sign`] as string | undefined;
+      const sign2 = (dream as any)[`${p2}_sign`] as string | undefined;
+      const aspect = signAspect(sign1, sign2);
+      if (aspect && sign1 && sign2) {
+        aspects.push({ planet1: p1, planet2: p2, aspect, sign1, sign2 });
+      }
+    }
+  }
+  return aspects;
+}
+
 export async function generateInsights(dreams: Dream[]) {
-  const summary = dreams.map(d => ({ title:d.title, tags:d.tags, sun_sign:d.sun_sign, moon_sign:d.moon_sign, pluto_sign:d.pluto_sign, moon_phase:d.moon_phase, day_number:d.day_number }));
+  const summary = dreams.map(d => ({
+    id: d.id,
+    title: d.title,
+    date: d.date,
+    tags: d.tags || [],
+    moon_phase: d.moon_phase,
+    day_number: d.day_number,
+    planets: Object.fromEntries(PLANETS.map(p => [p, (d as any)[`${p}_sign`] || null])),
+    major_aspects: deriveSignBasedAspects(d),
+  }));
+
   const response = await getAi().models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: `Analyze these dream records for interesting recurring themes and astrological/numerological associations. Do not invent precision or percentages that cannot be derived from the supplied records. Return 3-5 concise insights as a JSON array of strings. ${JSON.stringify(summary)}`,
+    contents: `Analyze these dream records for recurring dream themes and astrological/numerological associations.
+
+Use ALL ten planets: Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, and Pluto.
+
+Also analyze the supplied sign-based major aspects across every planet pair:
+- Conjunction: same zodiac sign; blended/unified emphasis.
+- Sextile: signs two positions apart; cooperative opportunity/talent.
+- Square: signs three positions apart; tension/friction/growth pressure.
+- Trine: signs four positions apart; harmony/flow/natural ease.
+- Opposition: signs six positions apart; polarity/awareness/balance.
+
+Important limitations:
+- The aspect labels supplied here are deterministically derived from zodiac-sign relationships, not exact planetary degrees or orbs. Do not describe them as degree-exact.
+- Only claim a recurring pattern when the supplied records actually support it.
+- Prefer specific counts (for example "3 of 5 dreams") over vague claims when useful.
+- Connect dream symbols/tags with planetary placements, moon phase, day number, and major aspects where evidence exists.
+- Do not invent percentages, frequencies, placements, or aspects.
+
+Return 4-7 concise but meaningful insights as a JSON array of strings. Each insight should state the evidence and then offer a careful interpretation.
+
+Dream data: ${JSON.stringify(summary)}`,
     config: { responseMimeType:"application/json", responseSchema:{ type:Type.ARRAY, items:{type:Type.STRING} } }
   });
   return parseJson(response.text);
