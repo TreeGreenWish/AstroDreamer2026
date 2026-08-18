@@ -15,18 +15,9 @@ export const config = {
 };
 
 function getPathParts(req: any): string[] {
-  const queryPath = req.query?.path;
-  if (Array.isArray(queryPath)) return queryPath.map(String);
-  if (typeof queryPath === "string" && queryPath.length > 0) {
-    return queryPath.split("/").filter(Boolean);
-  }
-
-  try {
-    const pathname = new URL(req.url || "/", "http://localhost").pathname;
-    return pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean);
-  } catch {
-    return [];
-  }
+  const rawUrl = String(req.url || "");
+  const pathname = rawUrl.split("?")[0] || "";
+  return pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean);
 }
 
 function getBody(req: any): any {
@@ -59,6 +50,18 @@ export default async function handler(req: any, res: any) {
         persistence: persistenceProvider,
         ai: Boolean(process.env.GEMINI_API_KEY),
       });
+    }
+
+    if (method === "GET" && parts[0] === "diagnostics" && parts[1] === "gemini") {
+      const result = await generateProfileAnalysis({
+        name: "AstraDream Diagnostic",
+        dob: "2000-01-01",
+        tob: "12:00",
+        lob_lat: 0,
+        lob_lng: 0,
+        lob_name: "Greenwich"
+      } as UserProfile);
+      return res.status(200).json({ ok: true, modelResponse: Boolean(result?.sun_sign) });
     }
 
     if (parts[0] === "profile" && parts.length === 1) {
