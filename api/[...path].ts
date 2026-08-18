@@ -15,10 +15,18 @@ export const config = {
 };
 
 function getPathParts(req: any): string[] {
-  const path = req.query?.path;
-  if (Array.isArray(path)) return path.map(String);
-  if (typeof path === "string") return path.split("/").filter(Boolean);
-  return [];
+  const queryPath = req.query?.path;
+  if (Array.isArray(queryPath)) return queryPath.map(String);
+  if (typeof queryPath === "string" && queryPath.length > 0) {
+    return queryPath.split("/").filter(Boolean);
+  }
+
+  try {
+    const pathname = new URL(req.url || "/", "http://localhost").pathname;
+    return pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function getBody(req: any): any {
