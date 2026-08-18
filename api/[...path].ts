@@ -1,4 +1,4 @@
-import { dataStore, persistenceProvider } from "../src/server/dataStore";
+import { dataStore, persistenceProvider } from "../src/server/dataStore.js";
 import {
   generateCreativePrompt,
   generateDreamImage,
@@ -7,8 +7,8 @@ import {
   getCurrentAstrology,
   getMonthAstrologyEvents,
   interpretDream,
-} from "../src/server/geminiService";
-import type { Dream, UserProfile } from "../src/types";
+} from "../src/server/geminiService.js";
+import type { Dream, UserProfile } from "../src/types.js";
 
 export const config = {
   maxDuration: 300,
