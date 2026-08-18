@@ -69,23 +69,26 @@ if (profile) {
 }
 
 for (const row of dreams) {
+  const { id: _oldId, image_url: oldImageUrl, ...restOfRow } = row;
   const dream = {
-    ...row,
+    ...restOfRow,
     planetary_influences: row.planetary_influences ? JSON.parse(row.planetary_influences) : null,
     tags: row.tags ? JSON.parse(row.tags) : [],
     notes: row.notes ? JSON.parse(row.notes) : [],
     image_url: null,
   };
 
-  await rest("dreams", {
+  const inserted = await rest("dreams?select=id", {
     method: "POST",
-    headers: { Prefer: "return=minimal" },
+    headers: { Prefer: "return=representation" },
     body: JSON.stringify(dream),
   });
+  const newId = inserted?.[0]?.id;
+  if (!newId) throw new Error(`Supabase did not return an id for SQLite dream ${row.id}`);
 
-  if (row.image_url) {
-    const imageUrl = await uploadImage(row.image_url, row.id);
-    await rest(`dreams?id=eq.${row.id}`, {
+  if (oldImageUrl) {
+    const imageUrl = await uploadImage(oldImageUrl, newId);
+    await rest(`dreams?id=eq.${newId}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify({ image_url: imageUrl }),
@@ -93,7 +96,6 @@ for (const row of dreams) {
   }
 }
 
-await rest("rpc/setval", { method: "POST", body: "{}" }).catch(() => null);
 const migrated = await rest("dreams?select=id");
 if (migrated.length !== dreams.length) {
   throw new Error(`Verification failed: expected ${dreams.length}, found ${migrated.length}`);
