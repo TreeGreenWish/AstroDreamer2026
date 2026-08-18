@@ -1,11 +1,15 @@
 import { dataStore } from "../src/server/dataStore.js";
 import type { Dream } from "../src/types.js";
 
+function normalizeTime(value?: string) {
+  return (value || "").slice(0, 5);
+}
+
 function sameDream(a: Dream, b: Dream) {
   return a.title === b.title &&
     a.content === b.content &&
     a.date === b.date &&
-    a.time === b.time &&
+    normalizeTime(a.time) === normalizeTime(b.time) &&
     a.location_name === b.location_name;
 }
 
