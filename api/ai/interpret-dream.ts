@@ -4,11 +4,15 @@ import type { Dream } from "../../src/types.js";
 
 export const config = { maxDuration: 300 };
 
+function normalizeTime(value?: string) {
+  return (value || "").slice(0, 5);
+}
+
 function sameDream(a: Dream, b: Dream) {
   return a.title === b.title &&
     a.content === b.content &&
     a.date === b.date &&
-    a.time === b.time &&
+    normalizeTime(a.time) === normalizeTime(b.time) &&
     a.location_name === b.location_name;
 }
 
@@ -30,7 +34,14 @@ function existingAnalysis(dream: Dream) {
     planetary_influences: dream.planetary_influences,
     tags: dream.tags || [],
     persisted_dream_id: dream.id,
+    pending: false,
   };
+}
+
+function isQuotaOrRateLimit(error: any) {
+  const status = Number(error?.status || error?.code || 0);
+  const message = error instanceof Error ? error.message : String(error || "");
+  return status === 429 || /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(message);
 }
 
 export default async function handler(req: any, res: any) {
@@ -81,13 +92,25 @@ export default async function handler(req: any, res: any) {
       };
 
       await dataStore.updateDream(persisted.id, enrichedDream);
-      return res.status(200).json({ ...analysis, persisted_dream_id: persisted.id });
-    } catch (error) {
+      return res.status(200).json({ ...analysis, persisted_dream_id: persisted.id, pending: false });
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : "Dream interpretation failed";
       await dataStore.updateDream(persisted.id, {
         ...persisted,
         enrichment_status: "raw",
-        interpretation_error: error instanceof Error ? error.message : "Dream interpretation failed",
+        interpretation_error: message,
       });
+
+      if (isQuotaOrRateLimit(error)) {
+        console.warn("Dream saved; interpretation deferred because Gemini quota is exhausted", error);
+        return res.status(200).json({
+          persisted_dream_id: persisted.id,
+          pending: true,
+          interpretation: null,
+          tags: [],
+        });
+      }
+
       throw error;
     }
   } catch (error) {
