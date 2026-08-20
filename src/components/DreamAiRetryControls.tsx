@@ -4,7 +4,7 @@ import { Image as ImageIcon, Loader2, Sparkles } from 'lucide-react';
 import type { Dream, UserProfile } from '../types';
 import { generateDreamImage, interpretDream } from '../services/geminiService';
 
-type ActionState = 'idle' | 'working' | 'success' | 'quota' | 'error';
+type ActionState = 'idle' | 'working' | 'pending' | 'success' | 'quota' | 'error';
 
 function normalizeTime(value?: string) {
   return (value || '').slice(0, 5);
@@ -12,6 +12,10 @@ function normalizeTime(value?: string) {
 
 function isQuotaMessage(message: string) {
   return /quota|resource_exhausted|rate.?limit|prepayment credits|429/i.test(message);
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function readJson(response: Response) {
@@ -88,10 +92,14 @@ export default function DreamAiRetryControls() {
     if (!dream) return '';
     if (interpretState === 'working') return 'Generating interpretation…';
     if (imageState === 'working') return 'Generating image…';
+    if (interpretState === 'pending') return 'Interpretation is still processing';
+    if (imageState === 'pending') return 'Image generation is still processing';
     if (interpretState === 'quota' || imageState === 'quota') return 'AI quota unavailable — dream is safely saved';
     if (interpretState === 'error' || imageState === 'error') return 'AI retry failed — dream is still safely saved';
     if (dream.image_url && dream.interpretation) return 'AI enrichment complete';
     if (dream.interpretation) return 'Interpretation complete · image pending';
+    if (dream.enrichment_status === 'interpreting') return 'Interpretation is still processing';
+    if (dream.interpretation_error && isQuotaMessage(dream.interpretation_error)) return 'Interpretation pending · quota unavailable';
     if (dream.interpretation_error) return 'Interpretation pending';
     return 'AI enrichment pending';
   }, [dream, interpretState, imageState]);
@@ -104,62 +112,165 @@ export default function DreamAiRetryControls() {
     return fresh;
   };
 
+  const persistDream = async (updated: Dream) => {
+    if (!updated.id) throw new Error('Dream id is missing');
+    const response = await fetch(`/api/dreams/${updated.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated)
+    });
+    const saved = await readJson(response) as Dream;
+    setDream(saved);
+    return saved;
+  };
+
+  const pollDream = async (
+    id: number,
+    isComplete: (fresh: Dream) => boolean,
+    attempts = 6,
+    intervalMs = 1500
+  ) => {
+    let latest: Dream | null = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (attempt > 0) await sleep(intervalMs);
+      latest = await refreshDream(id);
+      if (latest && isComplete(latest)) return latest;
+    }
+    return latest;
+  };
+
   const handleInterpret = async () => {
     if (!dream?.id || !profile) return;
+    const id = dream.id;
     setInterpretState('working');
     setMessage('');
 
+    let workingDream = dream;
     try {
-      const result = await interpretDream(dream, profile);
-      if (result?.pending) {
-        setInterpretState('quota');
-        setMessage(result.error || 'Interpretation is pending until AI quota is available.');
-        await refreshDream(dream.id);
+      // Clear stale errors so yesterday's quota state is never shown during a new attempt.
+      workingDream = await persistDream({
+        ...dream,
+        interpretation_error: undefined,
+        enrichment_status: dream.interpretation ? dream.enrichment_status : 'interpreting'
+      } as Dream);
+
+      const result = await interpretDream(workingDream, profile);
+      const fresh = await pollDream(id, d => Boolean(d.interpretation));
+
+      if (fresh?.interpretation) {
+        setInterpretState('success');
+        setMessage('Interpretation, symbols, and planetary enrichment are saved.');
         return;
       }
 
-      await refreshDream(dream.id);
-      setInterpretState('success');
-      setMessage('Interpretation, symbols, and planetary enrichment saved. Reopen this dream to see the refreshed interpretation.');
+      if (result?.pending) {
+        const savedError = fresh?.interpretation_error || result?.error || '';
+        if (isQuotaMessage(savedError)) {
+          setInterpretState('quota');
+          setMessage('Gemini reported a quota or billing limit. Your dream is safely saved and can be retried later.');
+        } else {
+          setInterpretState('pending');
+          setMessage('The interpretation request was accepted and is still processing. AstraDream will keep checking the saved dream state.');
+        }
+        return;
+      }
+
+      setInterpretState('pending');
+      setMessage('The interpretation request finished without a final saved result yet. The dream is safe; refresh or retry if it does not appear shortly.');
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Interpretation failed';
-      setInterpretState(isQuotaMessage(text) ? 'quota' : 'error');
+
+      // A slow client response can race with a successful server-side save. Check persisted state before calling it a failure.
+      try {
+        const fresh = await pollDream(id, d => Boolean(d.interpretation), 4, 1000);
+        if (fresh?.interpretation) {
+          setInterpretState('success');
+          setMessage('Interpretation completed and was saved successfully.');
+          return;
+        }
+
+        const savedError = fresh?.interpretation_error || text;
+        if (isQuotaMessage(savedError)) {
+          setInterpretState('quota');
+          setMessage('Gemini reported a quota or billing limit. Your dream is safely saved and can be retried later.');
+          return;
+        }
+      } catch {
+        // Preserve the original request error if the status refresh also fails.
+      }
+
+      setInterpretState('error');
       setMessage(text);
     }
   };
 
   const handleImage = async () => {
     if (!dream?.id) return;
+    const id = dream.id;
     setImageState('working');
     setMessage('');
 
+    let workingDream = dream;
     try {
-      const imageUrl = await generateDreamImage(dream);
-      if (!imageUrl) {
-        setImageState('quota');
-        setMessage('No image was returned. The dream remains saved and you can retry later.');
+      // Clear stale image errors before a new attempt.
+      workingDream = await persistDream({ ...dream, image_error: undefined } as Dream);
+      const imageUrl = await generateDreamImage(workingDream);
+
+      if (imageUrl) {
+        const updated = {
+          ...workingDream,
+          image_url: imageUrl,
+          image_generated_at: new Date().toISOString(),
+          image_error: undefined,
+          enrichment_status: workingDream.interpretation ? 'complete' : workingDream.enrichment_status
+        } as Dream;
+
+        await persistDream(updated);
+        const fresh = await pollDream(id, d => Boolean(d.image_url), 4, 1000);
+        if (fresh?.image_url) {
+          setImageState('success');
+          setMessage('Dream image generated and saved.');
+          return;
+        }
+      }
+
+      const fresh = await pollDream(id, d => Boolean(d.image_url), 6, 1500);
+      if (fresh?.image_url) {
+        setImageState('success');
+        setMessage('Dream image generated and saved.');
         return;
       }
 
-      const updated = {
-        ...dream,
-        image_url: imageUrl,
-        image_generated_at: new Date().toISOString(),
-        enrichment_status: dream.interpretation ? 'complete' : dream.enrichment_status
-      } as Dream;
-
-      const response = await fetch(`/api/dreams/${dream.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated)
-      });
-      const saved = await readJson(response) as Dream;
-      setDream(saved);
-      setImageState('success');
-      setMessage('Dream image generated and saved. Reopen this dream to see the refreshed image.');
+      const savedError = fresh?.image_error || '';
+      if (isQuotaMessage(savedError)) {
+        setImageState('quota');
+        setMessage('Gemini reported a quota or billing limit. Your dream is safely saved and you can retry the image later.');
+      } else {
+        setImageState('pending');
+        setMessage('The image request was accepted but no final image is saved yet. AstraDream will show it as soon as the saved dream updates.');
+      }
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Image generation failed';
-      setImageState(isQuotaMessage(text) ? 'quota' : 'error');
+
+      try {
+        const fresh = await pollDream(id, d => Boolean(d.image_url), 4, 1000);
+        if (fresh?.image_url) {
+          setImageState('success');
+          setMessage('Dream image generated and saved.');
+          return;
+        }
+
+        const savedError = fresh?.image_error || text;
+        if (isQuotaMessage(savedError)) {
+          setImageState('quota');
+          setMessage('Gemini reported a quota or billing limit. Your dream is safely saved and you can retry the image later.');
+          return;
+        }
+      } catch {
+        // Preserve the original request error if the status refresh also fails.
+      }
+
+      setImageState('error');
       setMessage(text);
     }
   };
