@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { createHash } from "node:crypto";
-import { dataStore, persistenceProvider } from "../src/server/dataStore";
+import { dataStore, persistenceProvider } from "../src/server/dataStore.js";
 
 function stableJson(value: unknown) {
   return JSON.stringify(value, null, 2);
