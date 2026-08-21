@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import type * as AstronomyTypes from "astronomy-engine";
 import type { AstrologyBodyFact, DreamAstrologyV1 } from "../types.js";
 
+// Astronomy Engine 2.x ships CommonJS at runtime; load it explicitly so Vercel ESM functions interoperate reliably.
 const require = createRequire(import.meta.url);
 const Astronomy = require("astronomy-engine") as typeof AstronomyTypes;
 
