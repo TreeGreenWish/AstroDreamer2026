@@ -15,12 +15,24 @@ async function postAi<T>(action: string, payload: unknown): Promise<T> {
   return response.json();
 }
 
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function generateProfileAnalysis(profile: UserProfile) {
   return postAi<any>("profile-analysis", { profile });
 }
 
 export function interpretDream(dream: Dream, userProfile: UserProfile) {
-  return postAi<any>("interpret-dream", { dream, userProfile });
+  const dreamWithTimeZone: Dream = {
+    ...dream,
+    timezone_name: dream.timezone_name || browserTimeZone(),
+  };
+  return postAi<any>("interpret-dream", { dream: dreamWithTimeZone, userProfile });
 }
 
 export function getCurrentAstrology(lat: number, lng: number, date: string, time: string) {
