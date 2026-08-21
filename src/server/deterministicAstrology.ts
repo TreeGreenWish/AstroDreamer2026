@@ -1,4 +1,4 @@
-import { Body, Ecliptic, EclipticGeoMoon, GeoVector, MoonPhase } from "astronomy-engine";
+import * as Astronomy from "astronomy-engine";
 import type { AstrologyBodyFact, DreamAstrologyV1 } from "../types.js";
 
 const SIGNS = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"] as const;
@@ -14,16 +14,16 @@ const ASPECT_ANGLES: Array<{ aspect: ExactAspectName; angle: number; maxOrb: num
 ];
 
 const EPHEMERIS_BODIES = {
-  sun: Body.Sun,
-  moon: Body.Moon,
-  mercury: Body.Mercury,
-  venus: Body.Venus,
-  mars: Body.Mars,
-  jupiter: Body.Jupiter,
-  saturn: Body.Saturn,
-  uranus: Body.Uranus,
-  neptune: Body.Neptune,
-  pluto: Body.Pluto,
+  sun: Astronomy.Body.Sun,
+  moon: Astronomy.Body.Moon,
+  mercury: Astronomy.Body.Mercury,
+  venus: Astronomy.Body.Venus,
+  mars: Astronomy.Body.Mars,
+  jupiter: Astronomy.Body.Jupiter,
+  saturn: Astronomy.Body.Saturn,
+  uranus: Astronomy.Body.Uranus,
+  neptune: Astronomy.Body.Neptune,
+  pluto: Astronomy.Body.Pluto,
 } as const;
 
 function mod(value: number, divisor: number) {
@@ -96,7 +96,6 @@ export function localDreamTimeToUtc(date: string, time: string, timezone: string
   const desiredAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
   let candidate = new Date(desiredAsUtc);
 
-  // Iterating handles ordinary UTC offsets and DST transitions using the runtime's IANA tz database.
   for (let i = 0; i < 4; i += 1) {
     const actual = partsAt(candidate, timezone);
     const actualAsUtc = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute, actual.second);
@@ -116,7 +115,6 @@ function reduceNumerology(value: number) {
   return current;
 }
 
-/** Universal-day style calendar-date numerology, preserving master numbers 11/22/33. */
 export function numerologicalDayNumber(date: string) {
   const digits = date.replace(/\D/g, "").split("").map(Number);
   if (!digits.length || digits.some(value => !Number.isFinite(value))) throw new Error("Invalid date for numerology");
@@ -129,7 +127,6 @@ function circularDegreeDistance(a: number, b: number) {
 }
 
 function lunarPhaseLabel(phaseAngle: number) {
-  // Reserve event labels for roughly ±21 hours around exact new/quarter/full phases.
   const eventWindowDegrees = 10.8;
   if (circularDegreeDistance(phaseAngle, 0) <= eventWindowDegrees) return "New Moon";
   if (Math.abs(phaseAngle - 90) <= eventWindowDegrees) return "First Quarter";
@@ -141,9 +138,8 @@ function lunarPhaseLabel(phaseAngle: number) {
   return "Waning Crescent";
 }
 
-/** Moon phase derived from the ephemeris Sun–Moon apparent ecliptic separation. */
 export function moonPhaseFacts(instant: Date) {
-  const phaseAngle = normalizeLongitude(MoonPhase(instant));
+  const phaseAngle = normalizeLongitude(Astronomy.MoonPhase(instant));
   const illumination = (1 - Math.cos(phaseAngle * Math.PI / 180)) / 2;
   return {
     phase_angle: round(phaseAngle, 6),
@@ -153,18 +149,17 @@ export function moonPhaseFacts(instant: Date) {
   };
 }
 
-function apparentGeocentricLongitude(body: Body, instant: Date) {
-  if (body === Body.Moon) return normalizeLongitude(EclipticGeoMoon(instant).lon);
-  // GeoVector returns the apparent geocentric EQJ vector; Ecliptic converts it to true ecliptic-of-date longitude.
-  return normalizeLongitude(Ecliptic(GeoVector(body, instant, true)).elon);
+function apparentGeocentricLongitude(body: Astronomy.Body, instant: Date) {
+  if (body === Astronomy.Body.Moon) return normalizeLongitude(Astronomy.EclipticGeoMoon(instant).lon);
+  return normalizeLongitude(Astronomy.Ecliptic(Astronomy.GeoVector(body, instant, true)).elon);
 }
 
 function signedAngularMotion(fromLongitude: number, toLongitude: number) {
   return mod(toLongitude - fromLongitude + 180, 360) - 180;
 }
 
-function isRetrograde(body: Body, instant: Date) {
-  if (body === Body.Sun || body === Body.Moon) return false;
+function isRetrograde(body: Astronomy.Body, instant: Date) {
+  if (body === Astronomy.Body.Sun || body === Astronomy.Body.Moon) return false;
   const halfDay = 12 * 60 * 60 * 1000;
   const before = apparentGeocentricLongitude(body, new Date(instant.getTime() - halfDay));
   const after = apparentGeocentricLongitude(body, new Date(instant.getTime() + halfDay));
@@ -203,9 +198,7 @@ export function exactMajorAspects(bodies: Record<string, AstrologyBodyFact>) {
         }
       }
 
-      if (best) {
-        aspects.push({ planet1, planet2, aspect: best.aspect, orb: round(best.orb, 3) });
-      }
+      if (best) aspects.push({ planet1, planet2, aspect: best.aspect, orb: round(best.orb, 3) });
     }
   }
 
@@ -221,7 +214,6 @@ export function deterministicDreamFacts(date: string, time: string, timezone: st
   };
 }
 
-/** Full deterministic astrological substrate for a dream moment. Gemini must interpret, never calculate, these facts. */
 export function deterministicDreamAstrology(date: string, time: string, timezone: string): DreamAstrologyV1 & { instant_utc: string; day_number: number; phase_angle: number } {
   const instant = localDreamTimeToUtc(date, time, timezone);
   const moon = moonPhaseFacts(instant);
