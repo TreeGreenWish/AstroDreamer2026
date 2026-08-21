@@ -43,6 +43,7 @@ ${JSON.stringify({
 
 User context available to this version:
 ${JSON.stringify({
+  personal_context: userProfile.context_memory || [],
   birth_chart_interpretation: userProfile.birth_chart_interpretation || null,
   natal_signs: {
     sun: userProfile.sun_sign || null,
@@ -73,7 +74,8 @@ Dream interpretation rules:
 - Ground every observation in details actually present in the dream.
 - Distinguish observation from inference. Do not diagnose the user or claim hidden facts.
 - Symbols are contextual: provide multiple plausible meanings when warranted rather than a single universal definition.
-- Use personal notes as privileged waking-life context when they clarify a person, place, object, or event.
+- Treat explicit personal_context facts and the user's notes as privileged waking-life context. Never contradict an explicit relationship fact with a symbolic guess.
+- Do not expand personal context into unstated sensitive facts or assumptions.
 - Identify emotional movement, characters/relationships, settings, transformations, conflicts/tensions, unusual objects/actions, and the dream's central psychological or narrative movement.
 - Reflection questions must be specific to this dream and genuinely useful for journaling.
 - Alternative readings should be meaningfully different, not paraphrases.
@@ -99,48 +101,25 @@ Return JSON only.`,
               themes: stringArray,
               symbols: {
                 type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    context: { type: Type.STRING },
-                    possible_meanings: stringArray,
-                    confidence: { type: Type.STRING },
-                  },
-                  required: ["name", "context", "possible_meanings", "confidence"],
-                },
+                items: { type: Type.OBJECT, properties: {
+                  name: { type: Type.STRING }, context: { type: Type.STRING }, possible_meanings: stringArray, confidence: { type: Type.STRING },
+                }, required: ["name", "context", "possible_meanings", "confidence"] },
               },
               characters: {
                 type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    role: { type: Type.STRING },
-                    relationship_or_association: { type: Type.STRING },
-                  },
-                  required: ["name", "role"],
-                },
+                items: { type: Type.OBJECT, properties: {
+                  name: { type: Type.STRING }, role: { type: Type.STRING }, relationship_or_association: { type: Type.STRING },
+                }, required: ["name", "role"] },
               },
               locations: {
                 type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: { name: { type: Type.STRING }, significance: { type: Type.STRING } },
-                  required: ["name", "significance"],
-                },
+                items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, significance: { type: Type.STRING } }, required: ["name", "significance"] },
               },
               emotions: {
                 type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    emotion: { type: Type.STRING },
-                    intensity: { type: Type.STRING },
-                    context: { type: Type.STRING },
-                  },
-                  required: ["emotion", "intensity", "context"],
-                },
+                items: { type: Type.OBJECT, properties: {
+                  emotion: { type: Type.STRING }, intensity: { type: Type.STRING }, context: { type: Type.STRING },
+                }, required: ["emotion", "intensity", "context"] },
               },
               transformations: stringArray,
               tensions: stringArray,
@@ -153,15 +132,8 @@ Return JSON only.`,
           feature_json: {
             type: Type.OBJECT,
             properties: {
-              version: { type: Type.NUMBER },
-              themes: stringArray,
-              symbols: stringArray,
-              characters: stringArray,
-              locations: stringArray,
-              emotions: stringArray,
-              transformations: stringArray,
-              objects: stringArray,
-              actions: stringArray,
+              version: { type: Type.NUMBER }, themes: stringArray, symbols: stringArray, characters: stringArray, locations: stringArray,
+              emotions: stringArray, transformations: stringArray, objects: stringArray, actions: stringArray,
             },
             required: ["version", "themes", "symbols", "characters", "locations", "emotions", "transformations", "objects", "actions"],
           },
