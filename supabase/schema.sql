@@ -24,6 +24,8 @@ create table if not exists public.user_profiles (
   neptune_sign text,
   pluto_sign text,
   rising_sign text,
+  context_memory jsonb not null default '[]'::jsonb,
+  context_memory_version integer not null default 1,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -61,6 +63,8 @@ create table if not exists public.dreams (
   astrology_version integer,
   feature_json jsonb,
   feature_version integer,
+  context_facts jsonb not null default '[]'::jsonb,
+  revisits jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
