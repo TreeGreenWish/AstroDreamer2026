@@ -1,6 +1,7 @@
 import { dataStore } from "../../src/server/dataStore.js";
+import { deterministicDreamFacts } from "../../src/server/deterministicAstrology.js";
 import { interpretDreamV2 } from "../../src/server/dreamInterpreterV2.js";
-import type { Dream } from "../../src/types.js";
+import type { Dream, DreamAstrologyV1 } from "../../src/types.js";
 
 export const config = { maxDuration: 300 };
 
@@ -66,21 +67,42 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json(existingAnalysis(existing));
     }
 
-    const persisted = existing || await dataStore.createDream({ ...dream, enrichment_status: "raw" });
+    const timezone = dream.timezone_name || existing?.timezone_name || "UTC";
+    const dreamWithTimezone: Dream = { ...dream, timezone_name: timezone };
+    const deterministicFacts = deterministicDreamFacts(dreamWithTimezone.date, dreamWithTimezone.time, timezone);
+
+    const persisted = existing || await dataStore.createDream({ ...dreamWithTimezone, enrichment_status: "raw" });
     if (!persisted.id) throw new Error("Persisted dream is missing an id");
 
-    await dataStore.updateDream(persisted.id, { ...persisted, enrichment_status: "interpreting", interpretation_error: null });
+    await dataStore.updateDream(persisted.id, {
+      ...persisted,
+      ...dreamWithTimezone,
+      enrichment_status: "interpreting",
+      interpretation_error: null,
+    });
 
     try {
-      const analysis = await interpretDreamV2(dream, userProfile);
+      const analysis = await interpretDreamV2(dreamWithTimezone, userProfile);
+      const deterministicAstrology: DreamAstrologyV1 = {
+        version: 1,
+        calculated_at: new Date().toISOString(),
+        source: "astradream-deterministic-partial-v1",
+        bodies: {},
+        moon_phase: deterministicFacts.moon_phase,
+        moon_illumination: deterministicFacts.moon_illumination,
+        aspects: [],
+      };
+
       const enrichedDream: Dream = {
         ...persisted,
-        ...dream,
+        ...dreamWithTimezone,
         interpretation: analysis.interpretation,
         analysis_json: analysis.analysis_json,
         analysis_version: 1,
         feature_json: analysis.feature_json,
         feature_version: 1,
+        astrology_json: deterministicAstrology,
+        astrology_version: 1,
         sun_sign: analysis.sun_sign,
         moon_sign: analysis.moon_sign,
         mercury_sign: analysis.mercury_sign,
@@ -91,8 +113,8 @@ export default async function handler(req: any, res: any) {
         uranus_sign: analysis.uranus_sign,
         neptune_sign: analysis.neptune_sign,
         pluto_sign: analysis.pluto_sign,
-        moon_phase: analysis.moon_phase,
-        day_number: analysis.day_number,
+        moon_phase: deterministicFacts.moon_phase,
+        day_number: deterministicFacts.day_number,
         planetary_influences: analysis.planetary_influences as Dream["planetary_influences"],
         tags: analysis.tags,
         enrichment_status: "interpreted",
@@ -104,6 +126,12 @@ export default async function handler(req: any, res: any) {
       await dataStore.updateDream(persisted.id, enrichedDream);
       return res.status(200).json({
         ...analysis,
+        moon_phase: deterministicFacts.moon_phase,
+        moon_illumination: deterministicFacts.moon_illumination,
+        day_number: deterministicFacts.day_number,
+        instant_utc: deterministicFacts.instant_utc,
+        astrology_json: deterministicAstrology,
+        astrology_version: 1,
         analysis_version: 1,
         feature_version: 1,
         persisted_dream_id: persisted.id,
@@ -113,6 +141,19 @@ export default async function handler(req: any, res: any) {
       const message = error instanceof Error ? error.message : "Dream interpretation failed";
       await dataStore.updateDream(persisted.id, {
         ...persisted,
+        ...dreamWithTimezone,
+        moon_phase: deterministicFacts.moon_phase,
+        day_number: deterministicFacts.day_number,
+        astrology_json: {
+          version: 1,
+          calculated_at: new Date().toISOString(),
+          source: "astradream-deterministic-partial-v1",
+          bodies: {},
+          moon_phase: deterministicFacts.moon_phase,
+          moon_illumination: deterministicFacts.moon_illumination,
+          aspects: [],
+        },
+        astrology_version: 1,
         enrichment_status: "raw",
         interpretation_error: message,
       });
@@ -124,6 +165,8 @@ export default async function handler(req: any, res: any) {
           pending: true,
           interpretation: null,
           tags: [],
+          moon_phase: deterministicFacts.moon_phase,
+          day_number: deterministicFacts.day_number,
         });
       }
 
