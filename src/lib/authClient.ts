@@ -1,6 +1,7 @@
 const SUPABASE_URL = 'https://wgtagrrvnieuzheggsis.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_6XhsHFkPQukuQineOtvLeQ_14GlU3BT';
 const STORAGE_KEY = 'astradream.auth.session.v1';
+const PRODUCTION_APP_URL = 'https://astro-dreamer2026.vercel.app/';
 
 type SupabaseUser = { id: string; email?: string };
 
@@ -70,7 +71,7 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signUp(email: string, password: string) {
-  const response = await authRequest('/auth/v1/signup', {
+  const response = await authRequest(`/auth/v1/signup?redirect_to=${encodeURIComponent(PRODUCTION_APP_URL)}`, {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
