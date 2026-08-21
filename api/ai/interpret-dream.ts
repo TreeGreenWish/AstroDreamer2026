@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { dataStore } from "../../src/server/dataStore.js";
 import { deterministicDreamAstrology } from "../../src/server/deterministicAstrology.js";
 import { interpretDreamV2 } from "../../src/server/dreamInterpreterV2.js";
-import type { Dream } from "../../src/types.js";
+import { revisitDreamWithContext } from "../../src/server/dreamRevisit.js";
+import type { Dream, DreamRevisit, PersonalContextFact, UserProfile } from "../../src/types.js";
 
 export const config = { maxDuration: 300 };
 
@@ -57,6 +59,8 @@ function existingAnalysis(dream: Dream) {
     day_number: dream.day_number,
     planetary_influences: dream.planetary_influences,
     tags: dream.tags || [],
+    context_facts: dream.context_facts || [],
+    revisits: dream.revisits || [],
     persisted_dream_id: dream.id,
     pending: false,
   };
@@ -68,11 +72,39 @@ function isQuotaOrRateLimit(error: any) {
   return status === 429 || /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(message);
 }
 
+function normalizeFactPart(value: string) {
+  return (value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function factKey(fact: PersonalContextFact) {
+  return `${normalizeFactPart(fact.subject)}|${normalizeFactPart(fact.predicate)}`;
+}
+
+function mergeExplicitContext(
+  existing: PersonalContextFact[],
+  incoming: PersonalContextFact[],
+  dreamId: number,
+): PersonalContextFact[] {
+  const merged = new Map<string, PersonalContextFact>();
+  for (const fact of existing || []) merged.set(factKey(fact), fact);
+  for (const fact of incoming || []) {
+    if (fact.confidence !== "explicit") continue;
+    const stored: PersonalContextFact = {
+      ...fact,
+      confidence: "explicit",
+      source_dream_id: dreamId,
+      updated_at: new Date().toISOString(),
+    };
+    merged.set(factKey(stored), stored);
+  }
+  return [...merged.values()];
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    const { dream, userProfile } = req.body || {};
+    const { dream, userProfile, action = "interpret" } = req.body || {};
     if (!dream || !userProfile) return res.status(400).json({ error: "Dream and user profile are required" });
 
     const existing = (await dataStore.getDreams()).find((item) => sameDream(item, dream));
@@ -81,7 +113,7 @@ export default async function handler(req: any, res: any) {
     const persisted = existing || await dataStore.createDream({ ...dreamWithTimezone, enrichment_status: "raw" });
     if (!persisted.id) throw new Error("Persisted dream is missing an id");
 
-    // Compute and persist factual astrology before any Gemini call. The dream retains these facts even if AI is unavailable.
+    // Compute and persist factual astrology before any Gemini call.
     const astrology = deterministicDreamAstrology(dreamWithTimezone.date, dreamWithTimezone.time, timezone);
     const exactSigns = signsFromAstrology(astrology);
     const factualUpdate: Dream = {
@@ -94,10 +126,57 @@ export default async function handler(req: any, res: any) {
       astrology_version: 2,
       id: persisted.id,
     };
-
     await dataStore.updateDream(persisted.id, factualUpdate);
 
-    // V2 prose generated before exact ephemeris is intentionally upgraded once. Thereafter an unchanged dream reuses the result.
+    if (action === "revisit") {
+      if (!factualUpdate.interpretation) return res.status(400).json({ error: "Interpret the dream before revisiting it" });
+      const notes = factualUpdate.notes || [];
+      if (!notes.length) return res.status(400).json({ error: "Add a personal note before revisiting this dream" });
+
+      const previousRevisits = factualUpdate.revisits || [];
+      const latest = previousRevisits[previousRevisits.length - 1];
+      if (latest && latest.note_count >= notes.length) {
+        return res.status(409).json({ error: "No new personal notes have been added since the last revisit" });
+      }
+
+      const result = await revisitDreamWithContext(factualUpdate, userProfile, astrology);
+      const contextFacts = (result.context_facts || []).map((fact) => ({
+        ...fact,
+        source_dream_id: persisted.id,
+        updated_at: new Date().toISOString(),
+      }));
+      const revisit: DreamRevisit = {
+        ...result,
+        context_facts: contextFacts,
+        id: randomUUID(),
+        created_at: new Date().toISOString(),
+        note_count: notes.length,
+      };
+
+      const updatedDream: Dream = {
+        ...factualUpdate,
+        context_facts: contextFacts,
+        revisits: [...previousRevisits, revisit],
+      };
+      await dataStore.updateDream(persisted.id, updatedDream);
+
+      const currentProfile = (await dataStore.getProfile()) || userProfile as UserProfile;
+      const contextMemory = mergeExplicitContext(currentProfile.context_memory || [], contextFacts, persisted.id);
+      await dataStore.saveProfile({
+        ...currentProfile,
+        context_memory: contextMemory,
+        context_memory_version: 1,
+      });
+
+      return res.status(200).json({
+        revisit,
+        context_memory_count: contextMemory.length,
+        persisted_dream_id: persisted.id,
+        pending: false,
+      });
+    }
+
+    // Prose generated before exact ephemeris is intentionally upgraded once. Thereafter an unchanged dream reuses it.
     const alreadyEphemerisAware = existing?.interpretation &&
       (existing.analysis_version || 0) >= 2 &&
       existing.astrology_json?.source === EPHEMERIS_SOURCE;
@@ -110,7 +189,8 @@ export default async function handler(req: any, res: any) {
     });
 
     try {
-      const analysis = await interpretDreamV2(dreamWithTimezone, userProfile, astrology);
+      const currentProfile = (await dataStore.getProfile()) || userProfile as UserProfile;
+      const analysis = await interpretDreamV2(dreamWithTimezone, currentProfile, astrology);
       const enrichedDream: Dream = {
         ...factualUpdate,
         interpretation: analysis.interpretation,
@@ -143,7 +223,6 @@ export default async function handler(req: any, res: any) {
       });
     } catch (error: any) {
       const message = error instanceof Error ? error.message : "Dream interpretation failed";
-      // Never throw away a previous interpretation during a failed re-interpretation; exact ephemeris facts remain saved.
       await dataStore.updateDream(persisted.id, {
         ...factualUpdate,
         enrichment_status: persisted.interpretation ? "interpreted" : "raw",
@@ -167,7 +246,7 @@ export default async function handler(req: any, res: any) {
       throw error;
     }
   } catch (error) {
-    console.error("Dream interpretation failed after raw-save attempt", error);
+    console.error("Dream interpretation/revisit failed after raw-save attempt", error);
     const message = error instanceof Error ? error.message : "Dream interpretation failed";
     return res.status(500).json({ error: message });
   }
