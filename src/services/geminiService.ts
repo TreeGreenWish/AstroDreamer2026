@@ -1,4 +1,4 @@
-import type { Dream, UserProfile } from "../types";
+import type { Dream, DreamRevisit, UserProfile } from "../types";
 
 async function postAi<T>(action: string, payload: unknown): Promise<T> {
   const response = await fetch(`/api/ai/${action}`, {
@@ -23,16 +23,23 @@ function browserTimeZone() {
   }
 }
 
+function withTimeZone(dream: Dream): Dream {
+  return { ...dream, timezone_name: dream.timezone_name || browserTimeZone() };
+}
+
 export function generateProfileAnalysis(profile: UserProfile) {
   return postAi<any>("profile-analysis", { profile });
 }
 
 export function interpretDream(dream: Dream, userProfile: UserProfile) {
-  const dreamWithTimeZone: Dream = {
-    ...dream,
-    timezone_name: dream.timezone_name || browserTimeZone(),
-  };
-  return postAi<any>("interpret-dream", { dream: dreamWithTimeZone, userProfile });
+  return postAi<any>("interpret-dream", { dream: withTimeZone(dream), userProfile, action: "interpret" });
+}
+
+export function revisitDream(dream: Dream, userProfile: UserProfile) {
+  return postAi<{ revisit: DreamRevisit; context_memory_count: number; persisted_dream_id: number; pending: false }>(
+    "interpret-dream",
+    { dream: withTimeZone(dream), userProfile, action: "revisit" },
+  );
 }
 
 export function getCurrentAstrology(lat: number, lng: number, date: string, time: string) {
