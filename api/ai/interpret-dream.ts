@@ -1,5 +1,5 @@
 import { dataStore } from "../../src/server/dataStore.js";
-import { interpretDream } from "../../src/server/geminiService.js";
+import { interpretDreamV2 } from "../../src/server/dreamInterpreterV2.js";
 import type { Dream } from "../../src/types.js";
 
 export const config = { maxDuration: 300 };
@@ -19,6 +19,12 @@ function sameDream(a: Dream, b: Dream) {
 function existingAnalysis(dream: Dream) {
   return {
     interpretation: dream.interpretation,
+    analysis_json: dream.analysis_json,
+    feature_json: dream.feature_json,
+    analysis_version: dream.analysis_version,
+    feature_version: dream.feature_version,
+    astrology_json: dream.astrology_json,
+    astrology_version: dream.astrology_version,
     sun_sign: dream.sun_sign,
     moon_sign: dream.moon_sign,
     mercury_sign: dream.mercury_sign,
@@ -56,7 +62,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const existing = (await dataStore.getDreams()).find((item) => sameDream(item, dream));
-    if (existing?.id && existing.interpretation) {
+    if (existing?.id && existing.interpretation && existing.analysis_version === 1 && existing.feature_version === 1) {
       return res.status(200).json(existingAnalysis(existing));
     }
 
@@ -66,11 +72,15 @@ export default async function handler(req: any, res: any) {
     await dataStore.updateDream(persisted.id, { ...persisted, enrichment_status: "interpreting", interpretation_error: null });
 
     try {
-      const analysis = await interpretDream(dream, userProfile);
+      const analysis = await interpretDreamV2(dream, userProfile);
       const enrichedDream: Dream = {
         ...persisted,
         ...dream,
         interpretation: analysis.interpretation,
+        analysis_json: analysis.analysis_json,
+        analysis_version: 1,
+        feature_json: analysis.feature_json,
+        feature_version: 1,
         sun_sign: analysis.sun_sign,
         moon_sign: analysis.moon_sign,
         mercury_sign: analysis.mercury_sign,
@@ -83,7 +93,7 @@ export default async function handler(req: any, res: any) {
         pluto_sign: analysis.pluto_sign,
         moon_phase: analysis.moon_phase,
         day_number: analysis.day_number,
-        planetary_influences: analysis.planetary_influences,
+        planetary_influences: analysis.planetary_influences as Dream["planetary_influences"],
         tags: analysis.tags,
         enrichment_status: "interpreted",
         interpreted_at: new Date().toISOString(),
@@ -92,7 +102,13 @@ export default async function handler(req: any, res: any) {
       };
 
       await dataStore.updateDream(persisted.id, enrichedDream);
-      return res.status(200).json({ ...analysis, persisted_dream_id: persisted.id, pending: false });
+      return res.status(200).json({
+        ...analysis,
+        analysis_version: 1,
+        feature_version: 1,
+        persisted_dream_id: persisted.id,
+        pending: false,
+      });
     } catch (error: any) {
       const message = error instanceof Error ? error.message : "Dream interpretation failed";
       await dataStore.updateDream(persisted.id, {
