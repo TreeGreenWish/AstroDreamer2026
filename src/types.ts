@@ -107,6 +107,7 @@ export interface Dream {
   location_lat: number;
   location_lng: number;
   location_name: string;
+  timezone_name?: string;
   interpretation?: string;
   image_url?: string;
   sun_sign?: string;
