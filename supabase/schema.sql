@@ -54,6 +54,12 @@ create table if not exists public.dreams (
   planetary_influences jsonb,
   tags jsonb not null default '[]'::jsonb,
   notes jsonb not null default '[]'::jsonb,
+  analysis_json jsonb,
+  analysis_version integer,
+  astrology_json jsonb,
+  astrology_version integer,
+  feature_json jsonb,
+  feature_version integer,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
