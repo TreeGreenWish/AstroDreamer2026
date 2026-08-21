@@ -37,6 +37,7 @@ create table if not exists public.dreams (
   location_lat double precision not null,
   location_lng double precision not null,
   location_name text not null,
+  timezone_name text,
   interpretation text,
   image_url text,
   sun_sign text,
