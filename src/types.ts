@@ -29,6 +29,7 @@ export interface DreamRevisit {
 
 export interface UserProfile {
   id?: number;
+  user_id?: string | null;
   name: string;
   dob: string; // YYYY-MM-DD
   tob: string; // HH:mm
@@ -131,6 +132,7 @@ export type DreamEnrichmentStatus = 'raw' | 'interpreting' | 'interpreted' | 'im
 
 export interface Dream {
   id?: number;
+  user_id?: string | null;
   title: string;
   content: string;
   date: string; // YYYY-MM-DD
