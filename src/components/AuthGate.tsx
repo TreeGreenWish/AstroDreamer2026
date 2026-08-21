@@ -53,7 +53,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       try {
         const current = await getCurrentUser();
         setUser(current);
-        if (current) setStatus(await apiJson('/api/auth/status'));
+        if (current) setStatus(await apiJson('/api/profile?auth_action=status'));
       } catch (error) {
         console.error('Auth bootstrap failed', error);
       } finally { setChecking(false); }
@@ -71,7 +71,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       } else await signIn(email.trim(), password);
       const current = await getCurrentUser();
       setUser(current);
-      if (current) setStatus(await apiJson('/api/auth/status'));
+      if (current) setStatus(await apiJson('/api/profile?auth_action=status'));
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Authentication failed'); }
     finally { setWorking(false); }
   }
@@ -79,8 +79,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   async function claimArchive(event: React.FormEvent) {
     event.preventDefault(); setWorking(true); setMessage('');
     try {
-      await apiJson('/api/auth/claim-legacy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ claim_code: claimCode.trim() }) });
-      setStatus(await apiJson('/api/auth/status'));
+      await apiJson('/api/profile?auth_action=claim-legacy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ claim_code: claimCode.trim() }) });
+      setStatus(await apiJson('/api/profile?auth_action=status'));
       setMessage('Archive claimed successfully.');
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Archive claim failed'); }
     finally { setWorking(false); }
