@@ -1,3 +1,32 @@
+export interface PersonalContextFact {
+  subject: string;
+  predicate: string;
+  value: string;
+  confidence: 'explicit' | 'inferred';
+  source_dream_id?: number;
+  source_note_timestamp?: string;
+  updated_at?: string;
+}
+
+export interface DreamRevisit {
+  id: string;
+  created_at: string;
+  note_count: number;
+  context_facts: PersonalContextFact[];
+  changed_understanding: string;
+  revised_summary: string;
+  revised_interpretation: string;
+  changed_symbols: Array<{
+    name: string;
+    previous_reading: string;
+    updated_reading: string;
+    why: string;
+  }>;
+  preserved_points: string[];
+  reflection_questions: string[];
+  uncertainty_notes: string[];
+}
+
 export interface UserProfile {
   id?: number;
   name: string;
@@ -20,6 +49,8 @@ export interface UserProfile {
   neptune_sign?: string;
   pluto_sign?: string;
   rising_sign?: string;
+  context_memory?: PersonalContextFact[];
+  context_memory_version?: number;
 }
 
 export interface NoteEntry {
@@ -142,6 +173,8 @@ export interface Dream {
   astrology_version?: number | null;
   feature_json?: DreamFeaturesV1 | null;
   feature_version?: number | null;
+  context_facts?: PersonalContextFact[];
+  revisits?: DreamRevisit[];
   enrichment_status?: DreamEnrichmentStatus;
   interpreted_at?: string;
   image_generated_at?: string;
