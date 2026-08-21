@@ -104,31 +104,38 @@ function reduceNumerology(value: number) {
   return current;
 }
 
-/** Calendar-date numerology, preserving master numbers 11/22/33. */
+/** Universal-day style calendar-date numerology, preserving master numbers 11/22/33. */
 export function numerologicalDayNumber(date: string) {
   const digits = date.replace(/\D/g, "").split("").map(Number);
   if (!digits.length || digits.some(value => !Number.isFinite(value))) throw new Error("Invalid date for numerology");
   return reduceNumerology(digits.reduce((sum, value) => sum + value, 0));
 }
 
+function circularDistance(a: number, b: number) {
+  const raw = Math.abs(a - b);
+  return Math.min(raw, 1 - raw);
+}
+
+function lunarPhaseLabel(phase: number) {
+  // Reserve event-like labels for a narrow window around the actual quarter/new/full point.
+  const eventWindow = 0.03; // about 21 hours of a synodic month on either side.
+  if (circularDistance(phase, 0) <= eventWindow) return "New Moon";
+  if (Math.abs(phase - 0.25) <= eventWindow) return "First Quarter";
+  if (Math.abs(phase - 0.5) <= eventWindow) return "Full Moon";
+  if (Math.abs(phase - 0.75) <= eventWindow) return "Last Quarter";
+  if (phase < 0.25) return "Waxing Crescent";
+  if (phase < 0.5) return "Waxing Gibbous";
+  if (phase < 0.75) return "Waning Gibbous";
+  return "Waning Crescent";
+}
+
 export function moonPhaseFacts(instant: Date) {
   const elapsedDays = (instant.getTime() - NEW_MOON_EPOCH_MS) / 86_400_000;
   const phase = mod(elapsedDays / SYNODIC_MONTH_DAYS, 1);
   const illumination = (1 - Math.cos(phase * 2 * Math.PI)) / 2;
-  const phaseIndex = Math.floor(mod(phase + 1 / 16, 1) * 8) % 8;
-  const names = [
-    "New Moon",
-    "Waxing Crescent",
-    "First Quarter",
-    "Waxing Gibbous",
-    "Full Moon",
-    "Waning Gibbous",
-    "Last Quarter",
-    "Waning Crescent",
-  ];
   return {
     phase_fraction: round(phase, 6),
-    moon_phase: names[phaseIndex],
+    moon_phase: lunarPhaseLabel(phase),
     moon_illumination: round(illumination, 4),
   };
 }
