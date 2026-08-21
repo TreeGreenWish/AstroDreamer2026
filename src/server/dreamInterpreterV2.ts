@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import type { Dream, DreamAnalysisV1, DreamFeaturesV1, UserProfile } from "../types.js";
+import type { Dream, DreamAnalysisV1, DreamAstrologyV1, DreamFeaturesV1, UserProfile } from "../types.js";
 
 function getAi() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -17,21 +17,15 @@ export type DreamInterpretationV2 = {
   interpretation: string;
   analysis_json: DreamAnalysisV1;
   feature_json: DreamFeaturesV1;
-  sun_sign: string;
-  moon_sign: string;
-  mercury_sign: string;
-  venus_sign: string;
-  mars_sign: string;
-  jupiter_sign: string;
-  saturn_sign: string;
-  uranus_sign: string;
-  neptune_sign: string;
-  pluto_sign: string;
   planetary_influences: Record<string, string>;
   tags: string[];
 };
 
-export async function interpretDreamV2(dream: Dream, userProfile: UserProfile): Promise<DreamInterpretationV2> {
+export async function interpretDreamV2(
+  dream: Dream,
+  userProfile: UserProfile,
+  astrology: DreamAstrologyV1 & { instant_utc?: string; day_number?: number; phase_angle?: number }
+): Promise<DreamInterpretationV2> {
   const response = await getAi().models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `You are AstraDream's careful dream-analysis layer. Interpret the dream as a personal, contextual experience rather than applying a fixed universal dream dictionary.
@@ -42,6 +36,7 @@ ${JSON.stringify({
   content: dream.content,
   date: dream.date,
   time: dream.time,
+  timezone_name: dream.timezone_name,
   location_name: dream.location_name,
   notes: dream.notes || [],
 })}
@@ -64,19 +59,29 @@ ${JSON.stringify({
   },
 })}
 
-Interpretation rules:
+Deterministic dream-moment astrology supplied by AstraDream's ephemeris engine:
+${JSON.stringify(astrology)}
+
+Astrology rules:
+- The supplied dream-moment planetary longitudes, zodiac signs, degrees, retrograde flags, moon phase/illumination, and aspects/orbs are computed facts. Use them exactly as supplied.
+- NEVER calculate, alter, infer, or invent a planetary placement, retrograde, aspect, orb, moon phase, or numerological day number.
+- Treat astrology as an interpretive framework, not scientific proof of dream causation.
+- When discussing an aspect, prefer the exact aspect and orb provided in the evidence.
+- Do not manufacture natal-transit aspects: the current natal data contains sign-level context but not a deterministic degree-exact natal chart yet.
+
+Dream interpretation rules:
 - Ground every observation in details actually present in the dream.
 - Distinguish observation from inference. Do not diagnose the user or claim hidden facts.
 - Symbols are contextual: provide multiple plausible meanings when warranted rather than a single universal definition.
+- Use personal notes as privileged waking-life context when they clarify a person, place, object, or event.
 - Identify emotional movement, characters/relationships, settings, transformations, conflicts/tensions, unusual objects/actions, and the dream's central psychological or narrative movement.
 - Reflection questions must be specific to this dream and genuinely useful for journaling.
 - Alternative readings should be meaningfully different, not paraphrases.
 - Uncertainty notes should explicitly state where a reading depends on missing waking-life context.
 - Keep the top-level interpretation cohesive and readable, roughly 250-450 words. It should feel substantial enough to be worth an AI call without becoming repetitive.
-- Extract normalized features for longitudinal analytics. Use short canonical labels (for example "school", "flooding", "bird transformation", "grief", "technology") and avoid duplicates/synonyms within the same list.
+- Extract normalized features for longitudinal analytics. Use short canonical labels and avoid duplicates/synonyms within the same list.
 - Tags should be useful search/index terms, not generic filler.
-
-Compatibility note: this transitional version still returns planetary zodiac-sign fields used by the current UI. Moon phase and numerology are computed deterministically outside Gemini. Exact planetary longitudes/retrogrades/aspects will replace the remaining model-supplied sign fields in the ephemeris stage. Do not pretend the sign fields are degree/orb-exact.
+- For planetary_influences, interpret each supplied planet's exact dream-moment placement in 1-2 careful sentences. Mention retrograde only when the supplied fact says retrograde.
 
 Return JSON only.`,
     config: {
@@ -121,10 +126,7 @@ Return JSON only.`,
                 type: Type.ARRAY,
                 items: {
                   type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    significance: { type: Type.STRING },
-                  },
+                  properties: { name: { type: Type.STRING }, significance: { type: Type.STRING } },
                   required: ["name", "significance"],
                 },
               },
@@ -163,35 +165,17 @@ Return JSON only.`,
             },
             required: ["version", "themes", "symbols", "characters", "locations", "emotions", "transformations", "objects", "actions"],
           },
-          sun_sign: { type: Type.STRING },
-          moon_sign: { type: Type.STRING },
-          mercury_sign: { type: Type.STRING },
-          venus_sign: { type: Type.STRING },
-          mars_sign: { type: Type.STRING },
-          jupiter_sign: { type: Type.STRING },
-          saturn_sign: { type: Type.STRING },
-          uranus_sign: { type: Type.STRING },
-          neptune_sign: { type: Type.STRING },
-          pluto_sign: { type: Type.STRING },
           planetary_influences: {
             type: Type.OBJECT,
             properties: {
-              sun: { type: Type.STRING },
-              moon: { type: Type.STRING },
-              mercury: { type: Type.STRING },
-              venus: { type: Type.STRING },
-              mars: { type: Type.STRING },
-              jupiter: { type: Type.STRING },
-              saturn: { type: Type.STRING },
-              uranus: { type: Type.STRING },
-              neptune: { type: Type.STRING },
-              pluto: { type: Type.STRING },
+              sun: { type: Type.STRING }, moon: { type: Type.STRING }, mercury: { type: Type.STRING }, venus: { type: Type.STRING }, mars: { type: Type.STRING },
+              jupiter: { type: Type.STRING }, saturn: { type: Type.STRING }, uranus: { type: Type.STRING }, neptune: { type: Type.STRING }, pluto: { type: Type.STRING },
             },
             required: ["sun", "moon", "mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto"],
           },
           tags: stringArray,
         },
-        required: ["interpretation", "analysis_json", "feature_json", "sun_sign", "moon_sign", "mercury_sign", "venus_sign", "mars_sign", "jupiter_sign", "saturn_sign", "uranus_sign", "neptune_sign", "pluto_sign", "planetary_influences", "tags"],
+        required: ["interpretation", "analysis_json", "feature_json", "planetary_influences", "tags"],
       },
     },
   });
