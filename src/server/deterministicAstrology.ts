@@ -1,5 +1,9 @@
-import * as Astronomy from "astronomy-engine";
+import { createRequire } from "node:module";
+import type * as AstronomyTypes from "astronomy-engine";
 import type { AstrologyBodyFact, DreamAstrologyV1 } from "../types.js";
+
+const require = createRequire(import.meta.url);
+const Astronomy = require("astronomy-engine") as typeof AstronomyTypes;
 
 const SIGNS = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"] as const;
 
@@ -85,17 +89,13 @@ function partsAt(date: Date, timezone: string) {
   };
 }
 
-/** Resolve a local wall-clock date/time in an IANA timezone to UTC without a timezone dependency. */
 export function localDreamTimeToUtc(date: string, time: string, timezone: string) {
   const [year, month, day] = date.split("-").map(Number);
   const [hour = 0, minute = 0, second = 0] = time.split(":").map(Number);
-  if (![year, month, day, hour, minute, second].every(Number.isFinite)) {
-    throw new Error("Invalid dream date/time");
-  }
+  if (![year, month, day, hour, minute, second].every(Number.isFinite)) throw new Error("Invalid dream date/time");
 
   const desiredAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
   let candidate = new Date(desiredAsUtc);
-
   for (let i = 0; i < 4; i += 1) {
     const actual = partsAt(candidate, timezone);
     const actualAsUtc = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute, actual.second);
@@ -103,7 +103,6 @@ export function localDreamTimeToUtc(date: string, time: string, timezone: string
     if (Math.abs(delta) < 1000) break;
     candidate = new Date(candidate.getTime() + delta);
   }
-
   return candidate;
 }
 
@@ -149,7 +148,7 @@ export function moonPhaseFacts(instant: Date) {
   };
 }
 
-function apparentGeocentricLongitude(body: Astronomy.Body, instant: Date) {
+function apparentGeocentricLongitude(body: AstronomyTypes.Body, instant: Date) {
   if (body === Astronomy.Body.Moon) return normalizeLongitude(Astronomy.EclipticGeoMoon(instant).lon);
   return normalizeLongitude(Astronomy.Ecliptic(Astronomy.GeoVector(body, instant, true)).elon);
 }
@@ -158,7 +157,7 @@ function signedAngularMotion(fromLongitude: number, toLongitude: number) {
   return mod(toLongitude - fromLongitude + 180, 360) - 180;
 }
 
-function isRetrograde(body: Astronomy.Body, instant: Date) {
+function isRetrograde(body: AstronomyTypes.Body, instant: Date) {
   if (body === Astronomy.Body.Sun || body === Astronomy.Body.Moon) return false;
   const halfDay = 12 * 60 * 60 * 1000;
   const before = apparentGeocentricLongitude(body, new Date(instant.getTime() - halfDay));
@@ -183,35 +182,25 @@ function angularSeparation(a: number, b: number) {
 export function exactMajorAspects(bodies: Record<string, AstrologyBodyFact>) {
   const entries = Object.entries(bodies);
   const aspects: NonNullable<DreamAstrologyV1["aspects"]> = [];
-
   for (let i = 0; i < entries.length; i += 1) {
     for (let j = i + 1; j < entries.length; j += 1) {
       const [planet1, body1] = entries[i];
       const [planet2, body2] = entries[j];
       const separation = angularSeparation(body1.longitude, body2.longitude);
       let best: { aspect: ExactAspectName; orb: number } | null = null;
-
       for (const definition of ASPECT_ANGLES) {
         const orb = Math.abs(separation - definition.angle);
-        if (orb <= definition.maxOrb && (!best || orb < best.orb)) {
-          best = { aspect: definition.aspect, orb };
-        }
+        if (orb <= definition.maxOrb && (!best || orb < best.orb)) best = { aspect: definition.aspect, orb };
       }
-
       if (best) aspects.push({ planet1, planet2, aspect: best.aspect, orb: round(best.orb, 3) });
     }
   }
-
   return aspects.sort((a, b) => a.orb - b.orb);
 }
 
 export function deterministicDreamFacts(date: string, time: string, timezone: string) {
   const instant = localDreamTimeToUtc(date, time, timezone);
-  return {
-    instant_utc: instant.toISOString(),
-    day_number: numerologicalDayNumber(date),
-    ...moonPhaseFacts(instant),
-  };
+  return { instant_utc: instant.toISOString(), day_number: numerologicalDayNumber(date), ...moonPhaseFacts(instant) };
 }
 
 export function deterministicDreamAstrology(date: string, time: string, timezone: string): DreamAstrologyV1 & { instant_utc: string; day_number: number; phase_angle: number } {
