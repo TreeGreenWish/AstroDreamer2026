@@ -1,8 +1,7 @@
+import { Body, Ecliptic, EclipticGeoMoon, GeoVector, MoonPhase } from "astronomy-engine";
 import type { AstrologyBodyFact, DreamAstrologyV1 } from "../types.js";
 
 const SIGNS = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"] as const;
-const SYNODIC_MONTH_DAYS = 29.530588853;
-const NEW_MOON_EPOCH_MS = Date.UTC(2000, 0, 6, 18, 14, 0);
 
 export type ExactAspectName = "conjunction" | "sextile" | "square" | "trine" | "opposition";
 
@@ -13,6 +12,19 @@ const ASPECT_ANGLES: Array<{ aspect: ExactAspectName; angle: number; maxOrb: num
   { aspect: "trine", angle: 120, maxOrb: 7 },
   { aspect: "opposition", angle: 180, maxOrb: 8 },
 ];
+
+const EPHEMERIS_BODIES = {
+  sun: Body.Sun,
+  moon: Body.Moon,
+  mercury: Body.Mercury,
+  venus: Body.Venus,
+  mars: Body.Mars,
+  jupiter: Body.Jupiter,
+  saturn: Body.Saturn,
+  uranus: Body.Uranus,
+  neptune: Body.Neptune,
+  pluto: Body.Pluto,
+} as const;
 
 function mod(value: number, divisor: number) {
   return ((value % divisor) + divisor) % divisor;
@@ -111,33 +123,61 @@ export function numerologicalDayNumber(date: string) {
   return reduceNumerology(digits.reduce((sum, value) => sum + value, 0));
 }
 
-function circularDistance(a: number, b: number) {
+function circularDegreeDistance(a: number, b: number) {
   const raw = Math.abs(a - b);
-  return Math.min(raw, 1 - raw);
+  return Math.min(raw, 360 - raw);
 }
 
-function lunarPhaseLabel(phase: number) {
-  // Reserve event-like labels for a narrow window around the actual quarter/new/full point.
-  const eventWindow = 0.03; // about 21 hours of a synodic month on either side.
-  if (circularDistance(phase, 0) <= eventWindow) return "New Moon";
-  if (Math.abs(phase - 0.25) <= eventWindow) return "First Quarter";
-  if (Math.abs(phase - 0.5) <= eventWindow) return "Full Moon";
-  if (Math.abs(phase - 0.75) <= eventWindow) return "Last Quarter";
-  if (phase < 0.25) return "Waxing Crescent";
-  if (phase < 0.5) return "Waxing Gibbous";
-  if (phase < 0.75) return "Waning Gibbous";
+function lunarPhaseLabel(phaseAngle: number) {
+  // Reserve event labels for roughly ±21 hours around exact new/quarter/full phases.
+  const eventWindowDegrees = 10.8;
+  if (circularDegreeDistance(phaseAngle, 0) <= eventWindowDegrees) return "New Moon";
+  if (Math.abs(phaseAngle - 90) <= eventWindowDegrees) return "First Quarter";
+  if (Math.abs(phaseAngle - 180) <= eventWindowDegrees) return "Full Moon";
+  if (Math.abs(phaseAngle - 270) <= eventWindowDegrees) return "Last Quarter";
+  if (phaseAngle < 90) return "Waxing Crescent";
+  if (phaseAngle < 180) return "Waxing Gibbous";
+  if (phaseAngle < 270) return "Waning Gibbous";
   return "Waning Crescent";
 }
 
+/** Moon phase derived from the ephemeris Sun–Moon apparent ecliptic separation. */
 export function moonPhaseFacts(instant: Date) {
-  const elapsedDays = (instant.getTime() - NEW_MOON_EPOCH_MS) / 86_400_000;
-  const phase = mod(elapsedDays / SYNODIC_MONTH_DAYS, 1);
-  const illumination = (1 - Math.cos(phase * 2 * Math.PI)) / 2;
+  const phaseAngle = normalizeLongitude(MoonPhase(instant));
+  const illumination = (1 - Math.cos(phaseAngle * Math.PI / 180)) / 2;
   return {
-    phase_fraction: round(phase, 6),
-    moon_phase: lunarPhaseLabel(phase),
+    phase_angle: round(phaseAngle, 6),
+    phase_fraction: round(phaseAngle / 360, 6),
+    moon_phase: lunarPhaseLabel(phaseAngle),
     moon_illumination: round(illumination, 4),
   };
+}
+
+function apparentGeocentricLongitude(body: Body, instant: Date) {
+  if (body === Body.Moon) return normalizeLongitude(EclipticGeoMoon(instant).lon);
+  // GeoVector returns the apparent geocentric EQJ vector; Ecliptic converts it to true ecliptic-of-date longitude.
+  return normalizeLongitude(Ecliptic(GeoVector(body, instant, true)).elon);
+}
+
+function signedAngularMotion(fromLongitude: number, toLongitude: number) {
+  return mod(toLongitude - fromLongitude + 180, 360) - 180;
+}
+
+function isRetrograde(body: Body, instant: Date) {
+  if (body === Body.Sun || body === Body.Moon) return false;
+  const halfDay = 12 * 60 * 60 * 1000;
+  const before = apparentGeocentricLongitude(body, new Date(instant.getTime() - halfDay));
+  const after = apparentGeocentricLongitude(body, new Date(instant.getTime() + halfDay));
+  return signedAngularMotion(before, after) < 0;
+}
+
+export function ephemerisBodies(instant: Date) {
+  return Object.fromEntries(
+    Object.entries(EPHEMERIS_BODIES).map(([name, body]) => {
+      const longitude = apparentGeocentricLongitude(body, instant);
+      return [name, bodyFact(longitude, isRetrograde(body, instant))];
+    })
+  ) as Record<keyof typeof EPHEMERIS_BODIES, AstrologyBodyFact>;
 }
 
 function angularSeparation(a: number, b: number) {
@@ -178,5 +218,24 @@ export function deterministicDreamFacts(date: string, time: string, timezone: st
     instant_utc: instant.toISOString(),
     day_number: numerologicalDayNumber(date),
     ...moonPhaseFacts(instant),
+  };
+}
+
+/** Full deterministic astrological substrate for a dream moment. Gemini must interpret, never calculate, these facts. */
+export function deterministicDreamAstrology(date: string, time: string, timezone: string): DreamAstrologyV1 & { instant_utc: string; day_number: number; phase_angle: number } {
+  const instant = localDreamTimeToUtc(date, time, timezone);
+  const moon = moonPhaseFacts(instant);
+  const bodies = ephemerisBodies(instant);
+  return {
+    version: 1,
+    source: "astronomy-engine-2.1.19-geocentric-v1",
+    calculated_at: new Date().toISOString(),
+    instant_utc: instant.toISOString(),
+    day_number: numerologicalDayNumber(date),
+    phase_angle: moon.phase_angle,
+    moon_phase: moon.moon_phase,
+    moon_illumination: moon.moon_illumination,
+    bodies,
+    aspects: exactMajorAspects(bodies),
   };
 }
