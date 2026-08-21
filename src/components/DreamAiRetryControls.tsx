@@ -139,6 +139,10 @@ export default function DreamAiRetryControls() {
     return latest;
   };
 
+  const revealPersistedResult = () => {
+    window.setTimeout(() => window.location.reload(), 350);
+  };
+
   const handleInterpret = async () => {
     if (!dream?.id || !profile) return;
     const id = dream.id;
@@ -159,7 +163,8 @@ export default function DreamAiRetryControls() {
 
       if (fresh?.interpretation) {
         setInterpretState('success');
-        setMessage('Interpretation, symbols, and planetary enrichment are saved.');
+        setMessage('Interpretation, symbols, and planetary enrichment are saved. Refreshing the dream…');
+        revealPersistedResult();
         return;
       }
 
@@ -176,7 +181,7 @@ export default function DreamAiRetryControls() {
       }
 
       setInterpretState('pending');
-      setMessage('The interpretation request finished without a final saved result yet. The dream is safe; refresh or retry if it does not appear shortly.');
+      setMessage('The interpretation request finished without a final saved result yet. The dream is safe; retry if it does not appear shortly.');
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Interpretation failed';
 
@@ -185,7 +190,8 @@ export default function DreamAiRetryControls() {
         const fresh = await pollDream(id, d => Boolean(d.interpretation), 4, 1000);
         if (fresh?.interpretation) {
           setInterpretState('success');
-          setMessage('Interpretation completed and was saved successfully.');
+          setMessage('Interpretation completed and was saved successfully. Refreshing the dream…');
+          revealPersistedResult();
           return;
         }
 
@@ -229,7 +235,8 @@ export default function DreamAiRetryControls() {
         const fresh = await pollDream(id, d => Boolean(d.image_url), 4, 1000);
         if (fresh?.image_url) {
           setImageState('success');
-          setMessage('Dream image generated and saved.');
+          setMessage('Dream image generated and saved. Refreshing the dream…');
+          revealPersistedResult();
           return;
         }
       }
@@ -237,7 +244,8 @@ export default function DreamAiRetryControls() {
       const fresh = await pollDream(id, d => Boolean(d.image_url), 6, 1500);
       if (fresh?.image_url) {
         setImageState('success');
-        setMessage('Dream image generated and saved.');
+        setMessage('Dream image generated and saved. Refreshing the dream…');
+        revealPersistedResult();
         return;
       }
 
@@ -256,7 +264,8 @@ export default function DreamAiRetryControls() {
         const fresh = await pollDream(id, d => Boolean(d.image_url), 4, 1000);
         if (fresh?.image_url) {
           setImageState('success');
-          setMessage('Dream image generated and saved.');
+          setMessage('Dream image generated and saved. Refreshing the dream…');
+          revealPersistedResult();
           return;
         }
 
