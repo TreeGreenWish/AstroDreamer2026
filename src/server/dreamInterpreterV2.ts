@@ -27,8 +27,6 @@ export type DreamInterpretationV2 = {
   uranus_sign: string;
   neptune_sign: string;
   pluto_sign: string;
-  moon_phase: string;
-  day_number: number;
   planetary_influences: Record<string, string>;
   tags: string[];
 };
@@ -78,7 +76,7 @@ Interpretation rules:
 - Extract normalized features for longitudinal analytics. Use short canonical labels (for example "school", "flooding", "bird transformation", "grief", "technology") and avoid duplicates/synonyms within the same list.
 - Tags should be useful search/index terms, not generic filler.
 
-Compatibility note: this version still returns zodiac-sign/moon-phase fields used by the current UI. These will be replaced by deterministic ephemeris facts in the next architecture stage. Do not pretend those fields are degree/orb-exact.
+Compatibility note: this transitional version still returns planetary zodiac-sign fields used by the current UI. Moon phase and numerology are computed deterministically outside Gemini. Exact planetary longitudes/retrogrades/aspects will replace the remaining model-supplied sign fields in the ephemeris stage. Do not pretend the sign fields are degree/orb-exact.
 
 Return JSON only.`,
     config: {
@@ -175,8 +173,6 @@ Return JSON only.`,
           uranus_sign: { type: Type.STRING },
           neptune_sign: { type: Type.STRING },
           pluto_sign: { type: Type.STRING },
-          moon_phase: { type: Type.STRING },
-          day_number: { type: Type.NUMBER },
           planetary_influences: {
             type: Type.OBJECT,
             properties: {
@@ -195,7 +191,7 @@ Return JSON only.`,
           },
           tags: stringArray,
         },
-        required: ["interpretation", "analysis_json", "feature_json", "sun_sign", "moon_sign", "mercury_sign", "venus_sign", "mars_sign", "jupiter_sign", "saturn_sign", "uranus_sign", "neptune_sign", "pluto_sign", "moon_phase", "day_number", "planetary_influences", "tags"],
+        required: ["interpretation", "analysis_json", "feature_json", "sun_sign", "moon_sign", "mercury_sign", "venus_sign", "mars_sign", "jupiter_sign", "saturn_sign", "uranus_sign", "neptune_sign", "pluto_sign", "planetary_influences", "tags"],
       },
     },
   });
