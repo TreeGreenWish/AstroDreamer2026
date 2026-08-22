@@ -82,11 +82,15 @@ export async function getMonthAstrologyEvents(month: string, year: string) {
 
 export async function generateDreamImage(dream: Dream) {
   const response = await getAi().models.generateContent({
-    model: "gemini-2.5-flash-image",
-    contents: { parts: [{ text: `A mystical, ethereal, surreal digital painting representing this dream: ${dream.title}. ${dream.content}. Dreamy atmospheric cinematic lighting, high detail, celestial elements.` }] }
+    model: "gemini-3.1-flash-lite-image",
+    contents: { parts: [{ text: `Create a surreal dream-journal illustration inspired closely by this dream: ${dream.title}. ${dream.content}. Mystical, atmospheric, uncanny and emotionally faithful to the described imagery. Cinematic composition, painterly detail, no text or captions.` }] },
+    config: {
+      responseModalities: ["IMAGE"],
+      responseFormat: { image: { aspectRatio: "16:9", imageSize: "1K" } },
+    } as any,
   });
   for (const part of response.candidates?.[0]?.content?.parts || []) {
-    if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+    if (part.inlineData) return `data:${part.inlineData.mimeType || "image/png"};base64,${part.inlineData.data}`;
   }
   return null;
 }
@@ -127,60 +131,20 @@ function deriveSignBasedAspects(dream: Dream) {
       const sign1 = (dream as any)[`${p1}_sign`] as string | undefined;
       const sign2 = (dream as any)[`${p2}_sign`] as string | undefined;
       const aspect = signAspect(sign1, sign2);
-      if (aspect && sign1 && sign2) {
-        aspects.push({ planet1: p1, planet2: p2, aspect, sign1, sign2 });
-      }
+      if (aspect && sign1 && sign2) aspects.push({ planet1: p1, planet2: p2, aspect, sign1, sign2 });
     }
   }
   return aspects;
 }
 
 export async function generateInsights(dreams: Dream[]) {
-  const summary = dreams.map(d => ({
-    id: d.id,
-    title: d.title,
-    date: d.date,
-    tags: d.tags || [],
-    moon_phase: d.moon_phase,
-    day_number: d.day_number,
-    planets: Object.fromEntries(PLANETS.map(p => [p, (d as any)[`${p}_sign`] || null])),
-    major_aspects: deriveSignBasedAspects(d),
-  }));
-
-  const response = await getAi().models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `Analyze these dream records for recurring dream themes and astrological/numerological associations.
-
-Use ALL ten planets: Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, and Pluto.
-
-Also analyze the supplied sign-based major aspects across every planet pair:
-- Conjunction: same zodiac sign; blended/unified emphasis.
-- Sextile: signs two positions apart; cooperative opportunity/talent.
-- Square: signs three positions apart; tension/friction/growth pressure.
-- Trine: signs four positions apart; harmony/flow/natural ease.
-- Opposition: signs six positions apart; polarity/awareness/balance.
-
-Important limitations:
-- The aspect labels supplied here are deterministically derived from zodiac-sign relationships, not exact planetary degrees or orbs. Do not describe them as degree-exact.
-- Only claim a recurring pattern when the supplied records actually support it.
-- Prefer specific counts (for example "3 of 5 dreams") over vague claims when useful.
-- Connect dream symbols/tags with planetary placements, moon phase, day number, and major aspects where evidence exists.
-- Do not invent percentages, frequencies, placements, or aspects.
-
-Return 4-7 concise but meaningful insights as a JSON array of strings. Each insight should state the evidence and then offer a careful interpretation.
-
-Dream data: ${JSON.stringify(summary)}`,
-    config: { responseMimeType:"application/json", responseSchema:{ type:Type.ARRAY, items:{type:Type.STRING} } }
-  });
+  const summary = dreams.map(d => ({ id: d.id, title: d.title, date: d.date, tags: d.tags || [], moon_phase: d.moon_phase, day_number: d.day_number, planets: Object.fromEntries(PLANETS.map(p => [p, (d as any)[`${p}_sign`] || null])), major_aspects: deriveSignBasedAspects(d) }));
+  const response = await getAi().models.generateContent({ model: "gemini-3-flash-preview", contents: `Analyze these dream records for recurring dream themes and astrological/numerological associations. Use ALL ten planets. Treat supplied sign-based aspects as deterministic sign relationships, not degree-exact aspects. Only claim patterns supported by the records; prefer specific counts and do not invent frequencies. Return 4-7 concise meaningful insights as a JSON array of strings. Dream data: ${JSON.stringify(summary)}`, config: { responseMimeType:"application/json", responseSchema:{ type:Type.ARRAY, items:{type:Type.STRING} } } });
   return parseJson(response.text);
 }
 
 export async function generateCreativePrompt(dreams: Dream[], insights: string[]) {
   const summary = dreams.map(d => ({ id:d.id, title:d.title, date:d.date, tags:d.tags }));
-  const response = await getAi().models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `Create one mystical creative-writing prompt based on recurring symbols, an anniversary dream if present, or a significant past dream. Insights: ${JSON.stringify(insights)} Dreams: ${JSON.stringify(summary)}. Return JSON with prompt, dreamId (number or null), and type ('symbol','anniversary','past_dream').`,
-    config: { responseMimeType:"application/json", responseSchema:{ type:Type.OBJECT, properties:{ prompt:{type:Type.STRING}, dreamId:{type:Type.NUMBER}, type:{type:Type.STRING} }, required:["prompt","type"] } }
-  });
+  const response = await getAi().models.generateContent({ model: "gemini-3-flash-preview", contents: `Create one mystical creative-writing prompt based on recurring symbols, an anniversary dream if present, or a significant past dream. Insights: ${JSON.stringify(insights)} Dreams: ${JSON.stringify(summary)}. Return JSON with prompt, dreamId (number or null), and type ('symbol','anniversary','past_dream').`, config: { responseMimeType:"application/json", responseSchema:{ type:Type.OBJECT, properties:{ prompt:{type:Type.STRING}, dreamId:{type:Type.NUMBER}, type:{type:Type.STRING} }, required:["prompt","type"] } } });
   return parseJson(response.text);
 }
