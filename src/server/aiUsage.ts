@@ -111,7 +111,7 @@ export async function assertAiUsageAllowed(userId: string, operation: AiOperatio
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
   const rows = await rest<Array<{ estimated_cost_usd?: number | string | null; image_count?: number | null; created_at: string }>>(
-    `ai_usage_events?user_id=eq.${encodeURIComponent(userId)}&created_at=gte.${encodeURIComponent(monthStart)}&select=estimated_cost_usd,image_count,created_at`,
+    `ai_usage_events?user_id=eq.${encodeURIComponent(userId)}&cache_hit=eq.false&created_at=gte.${encodeURIComponent(monthStart)}&select=estimated_cost_usd,image_count,created_at`,
   );
   const monthSpend = rows.reduce((sum, row) => sum + Number(row.estimated_cost_usd || 0), 0);
   const monthImages = rows.reduce((sum, row) => sum + Number(row.image_count || 0), 0);
