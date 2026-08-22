@@ -58,6 +58,23 @@ function toStoredSession(payload: any): StoredSession {
   };
 }
 
+export function consumeAuthRedirect(): 'recovery' | 'session' | null {
+  if (typeof window === 'undefined' || !window.location.hash) return null;
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const accessToken = params.get('access_token');
+  const refreshToken = params.get('refresh_token');
+  const type = params.get('type');
+  const expiresIn = Number(params.get('expires_in') || 3600);
+  if (!accessToken || !refreshToken) return null;
+  persist({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+  });
+  window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+  return type === 'recovery' ? 'recovery' : 'session';
+}
+
 export async function signIn(email: string, password: string) {
   const response = await authRequest('/auth/v1/token?grant_type=password', {
     method: 'POST',
@@ -82,6 +99,29 @@ export async function signUp(email: string, password: string) {
     return { user: payload.user as SupabaseUser, signedIn: true };
   }
   return { user: payload.user as SupabaseUser, signedIn: false };
+}
+
+export async function requestPasswordReset(email: string) {
+  const response = await authRequest(`/auth/v1/recover?redirect_to=${encodeURIComponent(PRODUCTION_APP_URL)}`, {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.msg || payload?.error_description || payload?.message || 'Password reset request failed');
+}
+
+export async function updatePassword(password: string) {
+  const current = await getSession();
+  if (!current) throw new Error('A valid recovery or sign-in session is required');
+  const response = await authRequest('/auth/v1/user', {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${current.access_token}` },
+    body: JSON.stringify({ password }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.msg || payload?.error_description || payload?.message || 'Password update failed');
+  if (payload?.id) persist({ ...current, user: payload as SupabaseUser });
+  return payload as SupabaseUser;
 }
 
 async function refreshSession(current: StoredSession) {
