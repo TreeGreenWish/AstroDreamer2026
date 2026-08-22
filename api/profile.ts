@@ -1,5 +1,5 @@
 import { dataStore } from "../src/server/dataStore.js";
-import { acceptBetaInvite, getBetaAccess, saveBetaFeedback } from "../src/server/betaAccess.js";
+import { acceptBetaInvite, createBetaInvite, getBetaAccess, isBetaOwner, listBetaInvites, saveBetaFeedback } from "../src/server/betaAccess.js";
 import { deleteUserAccount } from "../src/server/accountDeletion.js";
 import { claimLegacyArchive, legacyArchiveAvailable } from "../src/server/legacyArchive.js";
 import { requireIdentityUser, requirePrivateBetaUser } from "../src/server/requestAuth.js";
@@ -18,6 +18,7 @@ export default async function handler(req: any, res: any) {
         profile_exists: access.profileExists,
         invited: access.invited,
         invite_accepted: access.inviteAccepted,
+        is_owner: await isBetaOwner(user.id),
         legacy_archive_available: await legacyArchiveAvailable(),
       });
     }
@@ -34,6 +35,13 @@ export default async function handler(req: any, res: any) {
       const user = await requirePrivateBetaUser(req);
       await saveBetaFeedback(user.id, String(req.body?.category || "general"), String(req.body?.message || ""), String(req.body?.page || ""));
       return res.status(201).json({ success: true });
+    }
+
+    if (authAction === "invite") {
+      const user = await requirePrivateBetaUser(req);
+      if (req.method === "GET") return res.status(200).json(await listBetaInvites(user.id));
+      if (req.method === "POST") return res.status(201).json(await createBetaInvite(user.id, String(req.body?.email || "")));
+      return res.status(405).json({ error: "Method not allowed" });
     }
 
     if (authAction === "delete-account") {
