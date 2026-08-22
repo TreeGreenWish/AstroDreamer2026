@@ -114,10 +114,14 @@ drop policy if exists "Users delete own ai cache" on public.ai_cache;
 create policy "Users delete own ai cache" on public.ai_cache for delete to authenticated
 using ((select auth.uid()) = user_id);
 
--- This RPC is invoked only with the server-only service role. The user's access
--- token is verified separately before the trusted backend supplies p_user_id.
+-- This narrowly scoped SECURITY DEFINER RPC is executable only by service_role.
+-- The backend first verifies the user's Supabase access token and then supplies
+-- that verified UUID; browser roles cannot invoke this function directly.
 create or replace function public.claim_legacy_archive(p_user_id uuid, p_token_hash text)
-returns jsonb language plpgsql set search_path = '' as $$
+returns jsonb
+language plpgsql
+security definer
+set search_path = '' as $$
 declare
   claim_row public.legacy_archive_claims%rowtype;
   profile_count integer := 0;
@@ -147,11 +151,16 @@ $$;
 revoke all on function public.claim_legacy_archive(uuid, text) from public, anon, authenticated;
 grant execute on function public.claim_legacy_archive(uuid, text) to service_role;
 
-insert into storage.buckets (id, name, public)
-values ('dream-images', 'dream-images', true)
-on conflict (id) do update set public = excluded.public;
+-- Dream images are private. Object names begin with the authenticated owner's UUID.
+-- The backend uses service_role to upload and mint one-hour signed URLs for app reads.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('dream-images', 'dream-images', false, 10485760, array['image/png','image/jpeg','image/webp']::text[])
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
 
--- Transitional only. Private user-owned image paths are the next storage cutover.
 drop policy if exists "Public dream image reads" on storage.objects;
-create policy "Public dream image reads" on storage.objects for select to anon, authenticated
-using (bucket_id = 'dream-images');
+drop policy if exists "Users can read own dream images" on storage.objects;
+create policy "Users can read own dream images" on storage.objects for select to authenticated
+using (bucket_id = 'dream-images' and (storage.foldername(name))[1] = (select auth.uid())::text);
