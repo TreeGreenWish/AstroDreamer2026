@@ -8,20 +8,22 @@ import { requireAuthenticatedUser } from "../../src/server/requestAuth.js";
 import type { Dream, DreamRevisit, PersonalContextFact, UserProfile } from "../../src/types.js";
 
 export const config = { maxDuration: 300 };
-const EPHEMERIS_SOURCE = "astronomy-engine-2.1.19-geocentric-v1";
+const EXACT_EPHEMERIS_SOURCE = "astronomy-engine-2.1.19-geocentric-v1";
+const DATE_ONLY_EPHEMERIS_SOURCE = "astronomy-engine-2.1.19-geocentric-date-only-v1";
 const TEXT_MODEL = "gemini-3-flash-preview";
 
-function normalizeTime(value?: string) { return (value || "").slice(0, 5); }
+function normalizeTime(value?: string | null) { return (value || "").slice(0, 5); }
 function sameDream(a: Dream, b: Dream) {
-  return a.title === b.title && a.content === b.content && a.date === b.date && normalizeTime(a.time) === normalizeTime(b.time) && a.location_name === b.location_name;
+  return a.title === b.title && a.content === b.content && a.date === b.date && Boolean(a.time_known ?? true) === Boolean(b.time_known ?? true) && normalizeTime(a.time) === normalizeTime(b.time) && a.location_name === b.location_name;
 }
 function signsFromAstrology(astrology: ReturnType<typeof deterministicDreamAstrology>) {
+  const signs = astrology.reliable_signs || Object.fromEntries(Object.entries(astrology.bodies || {}).map(([name, body]) => [name, body.sign]));
   return {
-    sun_sign: astrology.bodies.sun.sign, moon_sign: astrology.bodies.moon.sign,
-    mercury_sign: astrology.bodies.mercury.sign, venus_sign: astrology.bodies.venus.sign,
-    mars_sign: astrology.bodies.mars.sign, jupiter_sign: astrology.bodies.jupiter.sign,
-    saturn_sign: astrology.bodies.saturn.sign, uranus_sign: astrology.bodies.uranus.sign,
-    neptune_sign: astrology.bodies.neptune.sign, pluto_sign: astrology.bodies.pluto.sign,
+    sun_sign: signs.sun, moon_sign: signs.moon,
+    mercury_sign: signs.mercury, venus_sign: signs.venus,
+    mars_sign: signs.mars, jupiter_sign: signs.jupiter,
+    saturn_sign: signs.saturn, uranus_sign: signs.uranus,
+    neptune_sign: signs.neptune, pluto_sign: signs.pluto,
   };
 }
 function existingAnalysis(dream: Dream) {
@@ -62,16 +64,19 @@ export default async function handler(req: any, res: any) {
     const { dream, userProfile, action = "interpret" } = req.body || {};
     if (!dream || !userProfile) return res.status(400).json({ error: "Dream and user profile are required" });
 
-    const existing = (await dataStore.getDreams(user.id)).find(item => sameDream(item, dream));
-    const timezone = dream.timezone_name || existing?.timezone_name || "UTC";
-    const dreamWithTimezone: Dream = { ...dream, timezone_name: timezone };
+    const timeKnown = dream.time_known !== false;
+    if (timeKnown && !dream.time) return res.status(400).json({ error: "Dream time is required unless Unknown time is selected" });
+    const normalizedDream: Dream = { ...dream, time_known: timeKnown, time: timeKnown ? dream.time : null };
+    const existing = (await dataStore.getDreams(user.id)).find(item => sameDream(item, normalizedDream));
+    const timezone = normalizedDream.timezone_name || existing?.timezone_name || "UTC";
+    const dreamWithTimezone: Dream = { ...normalizedDream, timezone_name: timezone };
     const persisted = existing || await dataStore.createDream({ ...dreamWithTimezone, enrichment_status: "raw" }, user.id);
     if (!persisted.id) throw new Error("Persisted dream is missing an id");
 
-    const astrology = deterministicDreamAstrology(dreamWithTimezone.date, dreamWithTimezone.time, timezone);
-    const exactSigns = signsFromAstrology(astrology);
+    const astrology = deterministicDreamAstrology(dreamWithTimezone.date, dreamWithTimezone.time, timezone, timeKnown);
+    const reliableSigns = signsFromAstrology(astrology);
     const factualUpdate: Dream = {
-      ...persisted, ...dreamWithTimezone, ...exactSigns,
+      ...persisted, ...dreamWithTimezone, ...reliableSigns,
       moon_phase: astrology.moon_phase, day_number: astrology.day_number,
       astrology_json: astrology, astrology_version: 2, id: persisted.id,
     };
@@ -86,25 +91,23 @@ export default async function handler(req: any, res: any) {
       if (latest && latest.note_count >= notes.length) return res.status(409).json({ error: "No new personal notes have been added since the last revisit" });
 
       const result = await meterEstimatedCall({
-        userId: user.id,
-        operation: "dream_revisit",
-        model: TEXT_MODEL,
+        userId: user.id, operation: "dream_revisit", model: TEXT_MODEL,
         input: { dream: factualUpdate, userProfile, astrology },
         execute: () => revisitDreamWithContext(factualUpdate, userProfile, astrology),
-        metadata: { dream_id: persisted.id, note_count: notes.length },
+        metadata: { dream_id: persisted.id, note_count: notes.length, time_precision: astrology.time_precision },
       });
       const contextFacts = (result.context_facts || []).map(fact => ({ ...fact, source_dream_id: persisted.id, updated_at: new Date().toISOString() }));
       const revisit: DreamRevisit = { ...result, context_facts: contextFacts, id: randomUUID(), created_at: new Date().toISOString(), note_count: notes.length };
       const updatedDream: Dream = { ...factualUpdate, context_facts: contextFacts, revisits: [...previousRevisits, revisit] };
       await dataStore.updateDream(persisted.id, updatedDream, user.id);
-
       const currentProfile = (await dataStore.getProfile(user.id)) || userProfile as UserProfile;
       const contextMemory = mergeExplicitContext(currentProfile.context_memory || [], contextFacts, persisted.id);
       await dataStore.saveProfile({ ...currentProfile, context_memory: contextMemory, context_memory_version: 1 }, user.id);
       return res.status(200).json({ revisit, context_memory_count: contextMemory.length, persisted_dream_id: persisted.id, pending: false });
     }
 
-    const alreadyEphemerisAware = existing?.interpretation && (existing.analysis_version || 0) >= 2 && existing.astrology_json?.source === EPHEMERIS_SOURCE;
+    const expectedSource = timeKnown ? EXACT_EPHEMERIS_SOURCE : DATE_ONLY_EPHEMERIS_SOURCE;
+    const alreadyEphemerisAware = existing?.interpretation && (existing.analysis_version || 0) >= 2 && existing.astrology_json?.source === expectedSource;
     if (alreadyEphemerisAware) {
       await logAiCacheHit(user.id, "dream_interpretation", TEXT_MODEL, { dream_id: persisted.id, reuse: "persisted_analysis" });
       return res.status(200).json(existingAnalysis({ ...existing, ...factualUpdate }));
@@ -114,12 +117,10 @@ export default async function handler(req: any, res: any) {
     try {
       const currentProfile = (await dataStore.getProfile(user.id)) || userProfile as UserProfile;
       const analysis = await meterEstimatedCall({
-        userId: user.id,
-        operation: "dream_interpretation",
-        model: TEXT_MODEL,
+        userId: user.id, operation: "dream_interpretation", model: TEXT_MODEL,
         input: { dream: dreamWithTimezone, userProfile: currentProfile, astrology },
         execute: () => interpretDreamV2(dreamWithTimezone, currentProfile, astrology),
-        metadata: { dream_id: persisted.id, analysis_version: 2 },
+        metadata: { dream_id: persisted.id, analysis_version: 2, time_precision: astrology.time_precision },
       });
       const enrichedDream: Dream = {
         ...factualUpdate, interpretation: analysis.interpretation, analysis_json: analysis.analysis_json,
@@ -129,7 +130,7 @@ export default async function handler(req: any, res: any) {
       };
       await dataStore.updateDream(persisted.id, enrichedDream, user.id);
       return res.status(200).json({
-        ...analysis, ...exactSigns, moon_phase: astrology.moon_phase, moon_illumination: astrology.moon_illumination,
+        ...analysis, ...reliableSigns, moon_phase: astrology.moon_phase, moon_illumination: astrology.moon_illumination,
         day_number: astrology.day_number, instant_utc: astrology.instant_utc, astrology_json: astrology,
         astrology_version: 2, analysis_version: 2, feature_version: 1, persisted_dream_id: persisted.id, pending: false,
       });
@@ -138,7 +139,7 @@ export default async function handler(req: any, res: any) {
       await dataStore.updateDream(persisted.id, { ...factualUpdate, enrichment_status: persisted.interpretation ? "interpreted" : "raw", interpretation_error: message }, user.id);
       if (isQuotaOrRateLimit(error)) {
         console.warn("Dream saved with deterministic astrology; interpretation deferred because Gemini quota or AstraDream AI budget is exhausted", error);
-        return res.status(200).json({ persisted_dream_id: persisted.id, pending: true, interpretation: persisted.interpretation || null, tags: persisted.tags || [], ...exactSigns, moon_phase: astrology.moon_phase, day_number: astrology.day_number, astrology_json: astrology, astrology_version: 2 });
+        return res.status(200).json({ persisted_dream_id: persisted.id, pending: true, interpretation: persisted.interpretation || null, tags: persisted.tags || [], ...reliableSigns, moon_phase: astrology.moon_phase, day_number: astrology.day_number, astrology_json: astrology, astrology_version: 2 });
       }
       throw error;
     }
