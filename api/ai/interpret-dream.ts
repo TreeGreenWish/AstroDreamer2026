@@ -3,11 +3,13 @@ import { dataStore } from "../../src/server/dataStore.js";
 import { deterministicDreamAstrology } from "../../src/server/deterministicAstrology.js";
 import { interpretDreamV2 } from "../../src/server/dreamInterpreterV2.js";
 import { revisitDreamWithContext } from "../../src/server/dreamRevisit.js";
+import { logAiCacheHit, meterEstimatedCall } from "../../src/server/aiUsage.js";
 import { requireAuthenticatedUser } from "../../src/server/requestAuth.js";
 import type { Dream, DreamRevisit, PersonalContextFact, UserProfile } from "../../src/types.js";
 
 export const config = { maxDuration: 300 };
 const EPHEMERIS_SOURCE = "astronomy-engine-2.1.19-geocentric-v1";
+const TEXT_MODEL = "gemini-3-flash-preview";
 
 function normalizeTime(value?: string) { return (value || "").slice(0, 5); }
 function sameDream(a: Dream, b: Dream) {
@@ -83,7 +85,14 @@ export default async function handler(req: any, res: any) {
       const latest = previousRevisits[previousRevisits.length - 1];
       if (latest && latest.note_count >= notes.length) return res.status(409).json({ error: "No new personal notes have been added since the last revisit" });
 
-      const result = await revisitDreamWithContext(factualUpdate, userProfile, astrology);
+      const result = await meterEstimatedCall({
+        userId: user.id,
+        operation: "dream_revisit",
+        model: TEXT_MODEL,
+        input: { dream: factualUpdate, userProfile, astrology },
+        execute: () => revisitDreamWithContext(factualUpdate, userProfile, astrology),
+        metadata: { dream_id: persisted.id, note_count: notes.length },
+      });
       const contextFacts = (result.context_facts || []).map(fact => ({ ...fact, source_dream_id: persisted.id, updated_at: new Date().toISOString() }));
       const revisit: DreamRevisit = { ...result, context_facts: contextFacts, id: randomUUID(), created_at: new Date().toISOString(), note_count: notes.length };
       const updatedDream: Dream = { ...factualUpdate, context_facts: contextFacts, revisits: [...previousRevisits, revisit] };
@@ -96,12 +105,22 @@ export default async function handler(req: any, res: any) {
     }
 
     const alreadyEphemerisAware = existing?.interpretation && (existing.analysis_version || 0) >= 2 && existing.astrology_json?.source === EPHEMERIS_SOURCE;
-    if (alreadyEphemerisAware) return res.status(200).json(existingAnalysis({ ...existing, ...factualUpdate }));
+    if (alreadyEphemerisAware) {
+      await logAiCacheHit(user.id, "dream_interpretation", TEXT_MODEL, { dream_id: persisted.id, reuse: "persisted_analysis" });
+      return res.status(200).json(existingAnalysis({ ...existing, ...factualUpdate }));
+    }
 
     await dataStore.updateDream(persisted.id, { ...factualUpdate, enrichment_status: "interpreting", interpretation_error: null }, user.id);
     try {
       const currentProfile = (await dataStore.getProfile(user.id)) || userProfile as UserProfile;
-      const analysis = await interpretDreamV2(dreamWithTimezone, currentProfile, astrology);
+      const analysis = await meterEstimatedCall({
+        userId: user.id,
+        operation: "dream_interpretation",
+        model: TEXT_MODEL,
+        input: { dream: dreamWithTimezone, userProfile: currentProfile, astrology },
+        execute: () => interpretDreamV2(dreamWithTimezone, currentProfile, astrology),
+        metadata: { dream_id: persisted.id, analysis_version: 2 },
+      });
       const enrichedDream: Dream = {
         ...factualUpdate, interpretation: analysis.interpretation, analysis_json: analysis.analysis_json,
         analysis_version: 2, feature_json: analysis.feature_json, feature_version: 1,
@@ -118,7 +137,7 @@ export default async function handler(req: any, res: any) {
       const message = error instanceof Error ? error.message : "Dream interpretation failed";
       await dataStore.updateDream(persisted.id, { ...factualUpdate, enrichment_status: persisted.interpretation ? "interpreted" : "raw", interpretation_error: message }, user.id);
       if (isQuotaOrRateLimit(error)) {
-        console.warn("Dream saved with deterministic astrology; interpretation deferred because Gemini quota is exhausted", error);
+        console.warn("Dream saved with deterministic astrology; interpretation deferred because Gemini quota or AstraDream AI budget is exhausted", error);
         return res.status(200).json({ persisted_dream_id: persisted.id, pending: true, interpretation: persisted.interpretation || null, tags: persisted.tags || [], ...exactSigns, moon_phase: astrology.moon_phase, day_number: astrology.day_number, astrology_json: astrology, astrology_version: 2 });
       }
       throw error;
@@ -126,6 +145,6 @@ export default async function handler(req: any, res: any) {
   } catch (error: any) {
     console.error("Dream interpretation/revisit failed after raw-save attempt", error);
     const status = Number(error?.status || 500);
-    return res.status(status).json({ error: error instanceof Error ? error.message : "Dream interpretation failed" });
+    return res.status(status).json({ error: error instanceof Error ? error.message : "Dream interpretation failed", code: error?.code });
   }
 }
