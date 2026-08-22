@@ -2,17 +2,16 @@ import { dataStore } from "../src/server/dataStore.js";
 import { acceptBetaInvite, getBetaAccess, saveBetaFeedback } from "../src/server/betaAccess.js";
 import { deleteUserAccount } from "../src/server/accountDeletion.js";
 import { claimLegacyArchive, legacyArchiveAvailable } from "../src/server/legacyArchive.js";
-import { requireAuthenticatedUser, requirePrivateBetaUser } from "../src/server/requestAuth.js";
+import { requireIdentityUser, requirePrivateBetaUser } from "../src/server/requestAuth.js";
 import type { UserProfile } from "../src/types.js";
 
 export default async function handler(req: any, res: any) {
   try {
     const authAction = String(req.query?.auth_action || "");
 
-    // Status and legacy claim intentionally require identity but not prior beta access.
     if (authAction === "status") {
       if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
-      const user = await requireAuthenticatedUser(req);
+      const user = await requireIdentityUser(req);
       const access = await getBetaAccess(user);
       return res.status(200).json({
         authenticated: true,
@@ -25,7 +24,7 @@ export default async function handler(req: any, res: any) {
 
     if (authAction === "claim-legacy") {
       if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-      const user = await requireAuthenticatedUser(req);
+      const user = await requireIdentityUser(req);
       const claimCode = String(req.body?.claim_code || "").trim();
       return res.status(200).json(await claimLegacyArchive(user.id, claimCode));
     }
