@@ -30,6 +30,11 @@ export type BetaAccess = {
   inviteAccepted: boolean;
 };
 
+export async function isBetaOwner(userId: string) {
+  const rows = await rest<Array<{ id: number }>>(`legacy_archive_claims?user_id=eq.${encodeURIComponent(userId)}&used_at=not.is.null&select=id&limit=1`);
+  return Boolean(rows[0]?.id);
+}
+
 export async function getBetaAccess(user: AuthenticatedRequestUser): Promise<BetaAccess> {
   const profiles = await rest<Array<{ id: number }>>(`user_profiles?user_id=eq.${encodeURIComponent(user.id)}&select=id&limit=1`);
   const profileExists = Boolean(profiles[0]?.id);
@@ -69,6 +74,34 @@ export async function requireBetaAccess(user: AuthenticatedRequestUser) {
     throw Object.assign(new Error("Private beta invitation required"), { status: 403 });
   }
   return access;
+}
+
+export async function createBetaInvite(ownerUserId: string, rawEmail: string) {
+  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can invite beta testers"), { status: 403 });
+  const email = rawEmail.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error("Enter a valid email address"), { status: 400 });
+  const existing = await rest<Array<{ id: number; revoked_at?: string | null }>>(`beta_invites?email=ilike.${encodeURIComponent(email)}&select=id,revoked_at&limit=1`);
+  if (existing[0]?.id) {
+    await rest(`beta_invites?id=eq.${existing[0].id}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ revoked_at: null, invited_at: new Date().toISOString() }),
+    });
+  } else {
+    await rest("beta_invites", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ email }),
+    });
+  }
+  return { email };
+}
+
+export async function listBetaInvites(ownerUserId: string) {
+  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can view beta invitations"), { status: 403 });
+  return rest<Array<{ id: number; email: string; invited_at: string; accepted_at?: string | null; revoked_at?: string | null }>>(
+    "beta_invites?select=id,email,invited_at,accepted_at,revoked_at&order=invited_at.desc",
+  );
 }
 
 export async function saveBetaFeedback(userId: string, category: string, message: string, page?: string) {
