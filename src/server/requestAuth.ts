@@ -41,3 +41,10 @@ export async function requireAuthenticatedUser(req: any): Promise<AuthenticatedR
   }
   return user;
 }
+
+export async function requirePrivateBetaUser(req: any): Promise<AuthenticatedRequestUser> {
+  const user = await requireAuthenticatedUser(req);
+  const { requireBetaAccess } = await import("./betaAccess.js");
+  await requireBetaAccess(user);
+  return user;
+}
