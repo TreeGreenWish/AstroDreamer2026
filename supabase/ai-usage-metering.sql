@@ -72,6 +72,8 @@ begin
   return new;
 end;
 $$;
+revoke all on function public.ensure_default_ai_usage_limits() from public, anon, authenticated;
+grant execute on function public.ensure_default_ai_usage_limits() to service_role;
 drop trigger if exists ensure_default_ai_usage_limits_on_profile on public.user_profiles;
 create trigger ensure_default_ai_usage_limits_on_profile after insert or update of user_id on public.user_profiles
 for each row execute function public.ensure_default_ai_usage_limits();
