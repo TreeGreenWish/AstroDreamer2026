@@ -32,7 +32,8 @@ export async function authenticatedUserFromRequest(req: any): Promise<Authentica
   return { id: user.id, email: typeof user.email === "string" ? user.email : undefined };
 }
 
-export async function requireAuthenticatedUser(req: any): Promise<AuthenticatedRequestUser> {
+// Identity-only guard. Keep this limited to auth bootstrap/status and legacy claim.
+export async function requireIdentityUser(req: any): Promise<AuthenticatedRequestUser> {
   const user = await authenticatedUserFromRequest(req);
   if (!user) {
     const error = new Error("Authentication required") as Error & { status?: number };
@@ -42,9 +43,12 @@ export async function requireAuthenticatedUser(req: any): Promise<AuthenticatedR
   return user;
 }
 
-export async function requirePrivateBetaUser(req: any): Promise<AuthenticatedRequestUser> {
-  const user = await requireAuthenticatedUser(req);
+// Default application guard: a valid identity must also be admitted to the beta.
+export async function requireAuthenticatedUser(req: any): Promise<AuthenticatedRequestUser> {
+  const user = await requireIdentityUser(req);
   const { requireBetaAccess } = await import("./betaAccess.js");
   await requireBetaAccess(user);
   return user;
 }
+
+export const requirePrivateBetaUser = requireAuthenticatedUser;
