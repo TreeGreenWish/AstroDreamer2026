@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, LogOut, Moon, ShieldCheck } from 'lucide-react';
-import { getAccessToken, getCurrentUser, signIn, signOut, signUp } from '../lib/authClient';
+import { KeyRound, Loader2, LogOut, Moon, ShieldCheck } from 'lucide-react';
+import { consumeAuthRedirect, getAccessToken, getCurrentUser, requestPasswordReset, signIn, signOut, signUp, updatePassword } from '../lib/authClient';
 
 type AuthUser = { id: string; email?: string };
 type AuthStatus = { authenticated: boolean; profile_exists: boolean; legacy_archive_available: boolean };
@@ -39,10 +39,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [claimCode, setClaimCode] = useState('');
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot' | 'reset'>('signin');
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState('');
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const needsClaim = Boolean(user && status?.legacy_archive_available && !status?.profile_exists);
   const betaLocked = Boolean(user && status && !status.profile_exists && !status.legacy_archive_available);
@@ -51,6 +53,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     installAuthenticatedFetch();
     (async () => {
       try {
+        const redirectType = consumeAuthRedirect();
+        if (redirectType === 'recovery') setMode('reset');
         const current = await getCurrentUser();
         setUser(current);
         if (current) setStatus(await apiJson('/api/profile?auth_action=status'));
@@ -60,7 +64,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const title = useMemo(() => mode === 'signup' ? 'Create your AstraDream account' : 'Enter your AstraDream archive', [mode]);
+  const title = useMemo(() => {
+    if (mode === 'signup') return 'Create your AstraDream account';
+    if (mode === 'forgot') return 'Reset your password';
+    if (mode === 'reset') return 'Choose a new password';
+    return 'Enter your AstraDream archive';
+  }, [mode]);
 
   async function submitAuth(event: React.FormEvent) {
     event.preventDefault(); setWorking(true); setMessage('');
@@ -76,6 +85,30 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     finally { setWorking(false); }
   }
 
+  async function sendRecovery(event: React.FormEvent) {
+    event.preventDefault(); setWorking(true); setMessage('');
+    try {
+      await requestPasswordReset(email.trim());
+      setMessage('Password reset email sent. Open the link in that email to choose a new password.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not send password reset email'); }
+    finally { setWorking(false); }
+  }
+
+  async function saveNewPassword(event: React.FormEvent) {
+    event.preventDefault(); setWorking(true); setMessage('');
+    try {
+      await updatePassword(newPassword);
+      setNewPassword('');
+      setShowChangePassword(false);
+      setMode('signin');
+      const current = await getCurrentUser();
+      setUser(current);
+      if (current) setStatus(await apiJson('/api/profile?auth_action=status'));
+      setMessage('Password updated successfully.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Password update failed'); }
+    finally { setWorking(false); }
+  }
+
   async function claimArchive(event: React.FormEvent) {
     event.preventDefault(); setWorking(true); setMessage('');
     try {
@@ -87,21 +120,40 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   async function handleSignOut() {
-    await signOut(); setUser(null); setStatus(null); setClaimCode(''); setMessage('');
+    await signOut(); setUser(null); setStatus(null); setClaimCode(''); setMessage(''); setMode('signin'); setShowChangePassword(false);
   }
 
   if (checking) return <div className="h-screen w-screen flex items-center justify-center bg-[#0a0502]"><div className="atmosphere" /><Loader2 className="w-8 h-8 animate-spin text-orange-500" /></div>;
 
+  if (mode === 'reset') {
+    return <Shell>
+      <KeyRound className="w-12 h-12 text-gold mx-auto mb-4" />
+      <h1 className="text-2xl font-serif text-white text-center mb-3">Choose a new password</h1>
+      <p className="text-white/50 text-sm text-center mb-6">Your recovery link has been verified. Set a new password for this AstraDream account.</p>
+      <form onSubmit={saveNewPassword} className="space-y-4">
+        <input required minLength={8} type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="New password" autoComplete="new-password" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50" />
+        <button disabled={working} className="w-full bg-gold text-deep-blue font-bold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50">{working && <Loader2 className="w-4 h-4 animate-spin" />}Update password</button>
+      </form>
+      {message && <p className="text-sm text-white/60 mt-4 text-center">{message}</p>}
+    </Shell>;
+  }
+
   if (!user) {
     return <Shell>
       <div className="text-center mb-8"><Moon className="w-12 h-12 text-gold mx-auto mb-4" /><h1 className="text-3xl font-serif text-white mb-2">{title}</h1><p className="text-white/50 text-sm">Your journal is private to your authenticated account.</p></div>
-      <form onSubmit={submitAuth} className="space-y-4">
-        <input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50" />
-        <input required minLength={8} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50" />
+      {mode === 'forgot' ? <form onSubmit={sendRecovery} className="space-y-4">
+        <input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" autoComplete="email" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50" />
+        <button disabled={working} className="w-full bg-gold text-deep-blue font-bold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50">{working && <Loader2 className="w-4 h-4 animate-spin" />}Send reset email</button>
+      </form> : <form onSubmit={submitAuth} className="space-y-4">
+        <input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" autoComplete="email" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50" />
+        <input required minLength={8} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50" />
         <button disabled={working} className="w-full bg-gold text-deep-blue font-bold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50">{working && <Loader2 className="w-4 h-4 animate-spin" />}{mode === 'signup' ? 'Create account' : 'Sign in'}</button>
-      </form>
+      </form>}
       {message && <p className="text-sm text-white/60 mt-4 text-center">{message}</p>}
-      <button onClick={() => { setMode(mode === 'signup' ? 'signin' : 'signup'); setMessage(''); }} className="w-full text-xs text-white/40 hover:text-white/70 mt-5">{mode === 'signup' ? 'Already have an account? Sign in' : 'Create an account'}</button>
+      {mode === 'forgot' ? <button onClick={() => { setMode('signin'); setMessage(''); }} className="w-full text-xs text-white/40 hover:text-white/70 mt-5">Back to sign in</button> : <>
+        {mode === 'signin' && <button onClick={() => { setMode('forgot'); setMessage(''); }} className="w-full text-xs text-white/40 hover:text-white/70 mt-5">Forgot password?</button>}
+        <button onClick={() => { setMode(mode === 'signup' ? 'signin' : 'signup'); setMessage(''); }} className="w-full text-xs text-white/40 hover:text-white/70 mt-3">{mode === 'signup' ? 'Already have an account? Sign in' : 'Create an account'}</button>
+      </>}
     </Shell>;
   }
 
@@ -128,5 +180,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     </Shell>;
   }
 
-  return <>{children}<button onClick={handleSignOut} className="fixed top-6 right-6 z-[70] flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-2 text-[10px] uppercase tracking-widest text-white/40 backdrop-blur-md hover:text-white/70" title={user.email || 'Sign out'}><LogOut className="h-3.5 w-3.5" />Sign out</button></>;
+  if (showChangePassword) {
+    return <Shell>
+      <KeyRound className="w-12 h-12 text-gold mx-auto mb-4" />
+      <h1 className="text-2xl font-serif text-white text-center mb-3">Change password</h1>
+      <p className="text-white/50 text-sm text-center mb-6">Your active session verifies your identity, so you can choose a new password without entering the old one.</p>
+      <form onSubmit={saveNewPassword} className="space-y-4">
+        <input required minLength={8} type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="New password" autoComplete="new-password" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50" />
+        <button disabled={working} className="w-full bg-gold text-deep-blue font-bold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50">{working && <Loader2 className="w-4 h-4 animate-spin" />}Update password</button>
+      </form>
+      {message && <p className="text-sm text-white/60 mt-4 text-center">{message}</p>}
+      <button onClick={() => { setShowChangePassword(false); setMessage(''); }} className="w-full text-xs text-white/40 hover:text-white/70 mt-5">Back to journal</button>
+    </Shell>;
+  }
+
+  return <>{children}<div className="fixed top-6 right-6 z-[70] flex gap-2"><button onClick={() => { setShowChangePassword(true); setMessage(''); }} className="flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-2 text-[10px] uppercase tracking-widest text-white/40 backdrop-blur-md hover:text-white/70" title="Change password"><KeyRound className="h-3.5 w-3.5" />Password</button><button onClick={handleSignOut} className="flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-2 text-[10px] uppercase tracking-widest text-white/40 backdrop-blur-md hover:text-white/70" title={user.email || 'Sign out'}><LogOut className="h-3.5 w-3.5" />Sign out</button></div></>;
 }
