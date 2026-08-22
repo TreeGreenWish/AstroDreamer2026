@@ -6,6 +6,7 @@ import DreamAiRetryControls from './components/DreamAiRetryControls';
 import { ExportJournalButton } from './components/ExportJournalButton';
 import { AuthGate } from './components/AuthGate';
 import UnknownDreamTimeSupport from './components/UnknownDreamTimeSupport';
+import { ProfileAccountControls } from './components/ProfileAccountControls';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -13,6 +14,7 @@ createRoot(document.getElementById('root')!).render(
     <AuthGate>
       <App />
       <UnknownDreamTimeSupport />
+      <ProfileAccountControls />
       <DreamAiRetryControls />
       <ExportJournalButton />
     </AuthGate>
