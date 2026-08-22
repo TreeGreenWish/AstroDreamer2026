@@ -117,7 +117,11 @@ export interface DreamAstrologyV1 {
   version: 1;
   calculated_at?: string;
   source: string;
+  time_precision?: 'exact' | 'date_only';
+  time_known?: boolean;
   bodies: Record<string, AstrologyBodyFact>;
+  reliable_signs?: Record<string, string>;
+  uncertain_bodies?: string[];
   moon_phase?: string;
   moon_illumination?: number;
   aspects?: Array<{
@@ -136,7 +140,8 @@ export interface Dream {
   title: string;
   content: string;
   date: string; // YYYY-MM-DD
-  time: string; // HH:mm
+  time: string | null; // HH:mm when known; null when unknown
+  time_known?: boolean;
   location_lat: number;
   location_lng: number;
   location_name: string;
