@@ -1,8 +1,10 @@
 import { generateCreativePrompt } from "../../src/server/geminiService.js";
 import { getCached, hashObject, setCached } from "../../src/server/aiCache.js";
+import { logAiCacheHit, meterEstimatedCall } from "../../src/server/aiUsage.js";
 import { requireAuthenticatedUser } from "../../src/server/requestAuth.js";
 
 export const config = { maxDuration: 300 };
+const MODEL = "gemini-3-flash-preview";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -13,13 +15,22 @@ export default async function handler(req: any, res: any) {
     const insights = Array.isArray(body.insights) ? body.insights : [];
     const cacheKey = `user:${user.id}:creative-prompt:${hashObject({ dreams, insights })}`;
     const cached = await getCached<any>(cacheKey);
-    if (cached) return res.status(200).json(cached);
-    const result = await generateCreativePrompt(dreams, insights);
+    if (cached) {
+      await logAiCacheHit(user.id, "creative_prompt", MODEL);
+      return res.status(200).json(cached);
+    }
+    const result = await meterEstimatedCall({
+      userId: user.id,
+      operation: "creative_prompt",
+      model: MODEL,
+      input: { dreams, insights },
+      execute: () => generateCreativePrompt(dreams, insights),
+    });
     await setCached(cacheKey, "creative-prompt", result, null);
     return res.status(200).json(result);
   } catch (error: any) {
     console.error("Creative prompt generation failed", error);
     const status = Number(error?.status || 500);
-    return res.status(status).json({ error: error instanceof Error ? error.message : "Creative prompt generation failed" });
+    return res.status(status).json({ error: error instanceof Error ? error.message : "Creative prompt generation failed", code: error?.code });
   }
 }
