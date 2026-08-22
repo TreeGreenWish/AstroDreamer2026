@@ -1,5 +1,5 @@
 import { dataStore } from "../src/server/dataStore.js";
-import { requireAuthenticatedUser } from "../src/server/requestAuth.js";
+import { requirePrivateBetaUser } from "../src/server/requestAuth.js";
 import type { Dream } from "../src/types.js";
 
 function normalizeTime(value?: string) { return (value || "").slice(0, 5); }
@@ -9,7 +9,7 @@ function sameDream(a: Dream, b: Dream) {
 
 export default async function handler(req: any, res: any) {
   try {
-    const user = await requireAuthenticatedUser(req);
+    const user = await requirePrivateBetaUser(req);
     if (req.method === "GET") return res.status(200).json(await dataStore.getDreams(user.id));
     if (req.method === "POST") {
       const dream = req.body as Dream;
