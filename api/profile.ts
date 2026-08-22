@@ -1,6 +1,7 @@
 import { dataStore } from "../src/server/dataStore.js";
 import { acceptBetaInvite, createBetaInvite, getBetaAccess, isBetaOwner, listBetaInvites, saveBetaFeedback } from "../src/server/betaAccess.js";
 import { deleteUserAccount } from "../src/server/accountDeletion.js";
+import { getAiUsageSummary } from "../src/server/aiUsageSummary.js";
 import { claimLegacyArchive, legacyArchiveAvailable } from "../src/server/legacyArchive.js";
 import { requireIdentityUser, requirePrivateBetaUser } from "../src/server/requestAuth.js";
 import type { UserProfile } from "../src/types.js";
@@ -44,6 +45,12 @@ export default async function handler(req: any, res: any) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
+    if (authAction === "ai-usage") {
+      if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+      const user = await requirePrivateBetaUser(req);
+      return res.status(200).json(await getAiUsageSummary(user.id));
+    }
+
     if (authAction === "delete-account") {
       if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
       const user = await requirePrivateBetaUser(req);
@@ -64,6 +71,6 @@ export default async function handler(req: any, res: any) {
   } catch (error: any) {
     console.error("Profile endpoint failed", error);
     const status = Number(error?.status || 500);
-    return res.status(status).json({ error: error instanceof Error ? error.message : "Profile endpoint failed" });
+    return res.status(status).json({ error: error instanceof Error ? error.message : "Profile endpoint failed", code: error?.code });
   }
 }
