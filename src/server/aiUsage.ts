@@ -22,6 +22,16 @@ type MeterOptions<T> = {
   metadata?: Record<string, unknown>;
 };
 
+type EstimatedMeterOptions<T> = {
+  userId: string;
+  operation: AiOperation;
+  model: string;
+  execute: () => Promise<T>;
+  input: unknown;
+  imageCount?: (result: T) => number;
+  metadata?: Record<string, unknown>;
+};
+
 const MODEL_PRICING: Record<string, { inputPerMillion: number; outputPerMillion: number; image1k?: number }> = {
   "gemini-3-flash-preview": { inputPerMillion: 0.50, outputPerMillion: 3.00 },
   "gemini-3.1-flash-lite-image": { inputPerMillion: 0.25, outputPerMillion: 1.50, image1k: 0.0336 },
@@ -48,8 +58,6 @@ function estimatedCost(model: string, usage: UsageMetadata | undefined, images: 
   const thinking = usage?.thoughtsTokenCount || 0;
   let cost = (input / 1_000_000) * pricing.inputPerMillion;
   if (pricing.image1k && images > 0) {
-    // Gemini image-token counts include the generated image itself. Charge image output
-    // at Google's published 1K equivalent instead of double-counting those tokens as text.
     const imageOutputTokens = (usage?.candidatesTokensDetails || [])
       .filter(item => String(item.modality || "").toUpperCase() === "IMAGE")
       .reduce((sum, item) => sum + (item.tokenCount || 0), 0);
@@ -59,6 +67,12 @@ function estimatedCost(model: string, usage: UsageMetadata | undefined, images: 
     cost += ((output + thinking) / 1_000_000) * pricing.outputPerMillion;
   }
   return Number(cost.toFixed(6));
+}
+
+function approximateTokens(value: unknown) {
+  if (value == null) return 0;
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return Math.max(1, Math.ceil(text.length / 4));
 }
 
 function errorFields(error: unknown) {
@@ -73,7 +87,20 @@ async function insertEvent(event: Record<string, unknown>) {
   await rest("ai_usage_events", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(event) });
 }
 
+async function assertProviderHealthy() {
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const recent = await rest<Array<{ success: boolean; created_at: string }>>(
+    `ai_usage_events?provider=eq.google-gemini&cache_hit=eq.false&created_at=gte.${encodeURIComponent(tenMinutesAgo)}&select=success,created_at&order=created_at.desc&limit=8`,
+  );
+  if (recent.length < 5) return;
+  const firstFive = recent.slice(0, 5);
+  if (firstFive.every(row => row.success === false)) {
+    throw Object.assign(new Error("Gemini is temporarily paused after repeated provider failures"), { status: 503, code: "AI_PROVIDER_CIRCUIT_OPEN" });
+  }
+}
+
 export async function assertAiUsageAllowed(userId: string, operation: AiOperation) {
+  await assertProviderHealthy();
   const limits = await rest<Array<{ monthly_budget_usd?: number | null; daily_request_limit?: number | null; monthly_image_limit?: number | null; enabled?: boolean }>>(
     `ai_usage_limits?user_id=eq.${encodeURIComponent(userId)}&select=monthly_budget_usd,daily_request_limit,monthly_image_limit,enabled&limit=1`,
   );
@@ -90,15 +117,9 @@ export async function assertAiUsageAllowed(userId: string, operation: AiOperatio
   const monthImages = rows.reduce((sum, row) => sum + Number(row.image_count || 0), 0);
   const dailyRequests = rows.filter(row => row.created_at >= dayStart).length;
 
-  if (limit.monthly_budget_usd != null && monthSpend >= Number(limit.monthly_budget_usd)) {
-    throw Object.assign(new Error("Monthly AI budget reached"), { status: 429, code: "AI_MONTHLY_BUDGET" });
-  }
-  if (limit.daily_request_limit != null && dailyRequests >= Number(limit.daily_request_limit)) {
-    throw Object.assign(new Error("Daily AI request limit reached"), { status: 429, code: "AI_DAILY_LIMIT" });
-  }
-  if (operation === "dream_image" && limit.monthly_image_limit != null && monthImages >= Number(limit.monthly_image_limit)) {
-    throw Object.assign(new Error("Monthly dream-image limit reached"), { status: 429, code: "AI_IMAGE_LIMIT" });
-  }
+  if (limit.monthly_budget_usd != null && monthSpend >= Number(limit.monthly_budget_usd)) throw Object.assign(new Error("Monthly AI budget reached"), { status: 429, code: "AI_MONTHLY_BUDGET" });
+  if (limit.daily_request_limit != null && dailyRequests >= Number(limit.daily_request_limit)) throw Object.assign(new Error("Daily AI request limit reached"), { status: 429, code: "AI_DAILY_LIMIT" });
+  if (operation === "dream_image" && limit.monthly_image_limit != null && monthImages >= Number(limit.monthly_image_limit)) throw Object.assign(new Error("Monthly dream-image limit reached"), { status: 429, code: "AI_IMAGE_LIMIT" });
 }
 
 export async function meterGeminiCall<T>({ userId, operation, model, execute, getUsage, imageCount, metadata = {} }: MeterOptions<T>): Promise<T> {
@@ -109,35 +130,43 @@ export async function meterGeminiCall<T>({ userId, operation, model, execute, ge
     const usage = getUsage?.(result);
     const images = imageCount?.(result) || 0;
     await insertEvent({
-      user_id: userId,
-      operation,
-      model,
-      provider: "google-gemini",
-      input_tokens: usage?.promptTokenCount ?? null,
-      output_tokens: usage?.candidatesTokenCount ?? null,
-      thinking_tokens: usage?.thoughtsTokenCount ?? null,
-      total_tokens: usage?.totalTokenCount ?? null,
-      image_count: images,
-      estimated_cost_usd: estimatedCost(model, usage, images),
-      latency_ms: Date.now() - started,
-      success: true,
-      cache_hit: false,
-      metadata,
+      user_id: userId, operation, model, provider: "google-gemini",
+      input_tokens: usage?.promptTokenCount ?? null, output_tokens: usage?.candidatesTokenCount ?? null,
+      thinking_tokens: usage?.thoughtsTokenCount ?? null, total_tokens: usage?.totalTokenCount ?? null,
+      image_count: images, estimated_cost_usd: estimatedCost(model, usage, images), latency_ms: Date.now() - started,
+      success: true, cache_hit: false, metadata: { token_count_source: usage ? "provider" : "unavailable", ...metadata },
     }).catch(error => console.warn("AI usage event write failed", error));
     return result;
   } catch (error) {
     await insertEvent({
-      user_id: userId,
-      operation,
-      model,
-      provider: "google-gemini",
-      image_count: 0,
-      estimated_cost_usd: 0,
-      latency_ms: Date.now() - started,
-      success: false,
-      cache_hit: false,
-      ...errorFields(error),
-      metadata,
+      user_id: userId, operation, model, provider: "google-gemini", image_count: 0, estimated_cost_usd: 0,
+      latency_ms: Date.now() - started, success: false, cache_hit: false, ...errorFields(error), metadata,
+    }).catch(writeError => console.warn("AI usage failure event write failed", writeError));
+    throw error;
+  }
+}
+
+export async function meterEstimatedCall<T>({ userId, operation, model, execute, input, imageCount, metadata = {} }: EstimatedMeterOptions<T>): Promise<T> {
+  await assertAiUsageAllowed(userId, operation);
+  const started = Date.now();
+  const inputTokens = approximateTokens(input);
+  try {
+    const result = await execute();
+    const images = imageCount?.(result) || 0;
+    const outputTokens = images ? 0 : approximateTokens(result);
+    const usage: UsageMetadata = { promptTokenCount: inputTokens, candidatesTokenCount: outputTokens, totalTokenCount: inputTokens + outputTokens };
+    await insertEvent({
+      user_id: userId, operation, model, provider: "google-gemini",
+      input_tokens: inputTokens, output_tokens: outputTokens, thinking_tokens: null, total_tokens: inputTokens + outputTokens,
+      image_count: images, estimated_cost_usd: estimatedCost(model, usage, images), latency_ms: Date.now() - started,
+      success: true, cache_hit: false, metadata: { token_count_source: "character_estimate", ...metadata },
+    }).catch(error => console.warn("AI usage event write failed", error));
+    return result;
+  } catch (error) {
+    await insertEvent({
+      user_id: userId, operation, model, provider: "google-gemini", input_tokens: inputTokens,
+      image_count: 0, estimated_cost_usd: 0, latency_ms: Date.now() - started, success: false, cache_hit: false,
+      ...errorFields(error), metadata: { token_count_source: "character_estimate", ...metadata },
     }).catch(writeError => console.warn("AI usage failure event write failed", writeError));
     throw error;
   }
@@ -145,15 +174,7 @@ export async function meterGeminiCall<T>({ userId, operation, model, execute, ge
 
 export async function logAiCacheHit(userId: string, operation: AiOperation, model: string, metadata: Record<string, unknown> = {}) {
   await insertEvent({
-    user_id: userId,
-    operation,
-    model,
-    provider: "google-gemini",
-    image_count: 0,
-    estimated_cost_usd: 0,
-    latency_ms: 0,
-    success: true,
-    cache_hit: true,
-    metadata,
+    user_id: userId, operation, model, provider: "google-gemini", image_count: 0, estimated_cost_usd: 0,
+    latency_ms: 0, success: true, cache_hit: true, metadata,
   }).catch(error => console.warn("AI cache-hit usage event write failed", error));
 }
