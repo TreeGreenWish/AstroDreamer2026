@@ -25,6 +25,28 @@ async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
   return text ? JSON.parse(text) : (undefined as T);
 }
 
+function authEmailError(response: Response, body: string, action: string) {
+  let errorCode = "";
+  try {
+    const payload = JSON.parse(body);
+    errorCode = String(payload?.error_code || payload?.code || "");
+  } catch {
+    // Preserve raw response below.
+  }
+
+  if (response.status === 429 || errorCode === "over_email_send_rate_limit") {
+    const retryAfter = response.headers.get("retry-after");
+    const suffix = retryAfter ? ` Try again in about ${retryAfter} seconds.` : " Try again after the Supabase email cooldown resets.";
+    return Object.assign(new Error(`Supabase temporarily rate-limited auth emails.${suffix}`), {
+      status: 429,
+      code: "email_rate_limited",
+      retryAfter,
+    });
+  }
+
+  return Object.assign(new Error(`${action} (${response.status}): ${body}`), { status: response.status, code: errorCode || undefined });
+}
+
 async function sendMagicLink(email: string) {
   const response = await fetch(`${supabaseUrl}/auth/v1/otp?redirect_to=${encodeURIComponent(appUrl)}`, {
     method: "POST",
@@ -33,7 +55,7 @@ async function sendMagicLink(email: string) {
   });
   if (!response.ok) {
     const body = await response.text();
-    throw Object.assign(new Error(`Could not send beta sign-in link (${response.status}): ${body}`), { status: response.status });
+    throw authEmailError(response, body, "Could not send beta sign-in link");
   }
   return { delivery: "magic_link" as const };
 }
@@ -52,7 +74,7 @@ async function sendInviteEmail(email: string) {
     const payload = JSON.parse(body);
     errorCode = String(payload?.error_code || payload?.code || "");
   } catch {
-    // Keep the raw response for the error below.
+    // Preserve raw response below.
   }
 
   // Supabase's admin invite endpoint cannot send a second invite once an Auth
@@ -63,7 +85,7 @@ async function sendInviteEmail(email: string) {
     return sendMagicLink(email);
   }
 
-  throw Object.assign(new Error(`Could not send beta invitation email (${response.status}): ${body}`), { status: response.status });
+  throw authEmailError(response, body, "Could not send beta invitation email");
 }
 
 export type BetaAccess = {
@@ -124,6 +146,10 @@ export async function createBetaInvite(ownerUserId: string, rawEmail: string) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error("Enter a valid email address"), { status: 400 });
   const existing = await rest<Array<{ id: number; revoked_at?: string | null; accepted_at?: string | null }>>(`beta_invites?email=ilike.${encodeURIComponent(email)}&select=id,revoked_at,accepted_at&limit=1`);
   if (existing[0]?.accepted_at) throw Object.assign(new Error("That tester has already joined the private beta"), { status: 409 });
+
+  // Send first. Only mark the invitation as freshly sent after Supabase accepts
+  // the email request, so 429s never make the UI claim a resend succeeded.
+  const delivery = await sendInviteEmail(email);
   const invitedAt = new Date().toISOString();
   if (existing[0]?.id) {
     await rest(`beta_invites?id=eq.${existing[0].id}`, {
@@ -138,7 +164,6 @@ export async function createBetaInvite(ownerUserId: string, rawEmail: string) {
       body: JSON.stringify({ email, invited_at: invitedAt }),
     });
   }
-  const delivery = await sendInviteEmail(email);
   return { email, emailed: true, ...delivery };
 }
 
@@ -150,13 +175,14 @@ export async function resendBetaInvite(ownerUserId: string, inviteId: number) {
   const invite = rows[0];
   if (!invite) throw Object.assign(new Error("Invitation not found"), { status: 404 });
   if (invite.accepted_at) throw Object.assign(new Error("That tester has already joined"), { status: 409 });
+
+  const delivery = await sendInviteEmail(invite.email);
   const invitedAt = new Date().toISOString();
   await rest(`beta_invites?id=eq.${invite.id}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({ revoked_at: null, invited_at: invitedAt, accepted_at: null, accepted_by: null }),
   });
-  const delivery = await sendInviteEmail(invite.email);
   return { email: invite.email, emailed: true, ...delivery };
 }
 
