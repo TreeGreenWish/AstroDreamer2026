@@ -1,5 +1,5 @@
 import { dataStore } from "../src/server/dataStore.js";
-import { acceptBetaInvite, createBetaInvite, getBetaAccess, isBetaOwner, listBetaInvites, resendBetaInvite, revokeBetaInvite, saveBetaFeedback } from "../src/server/betaAccess.js";
+import { acceptBetaInvite, createBetaInvite, createRecoveryCode, getBetaAccess, isBetaOwner, listBetaInvites, redeemRecoveryCode, redeemSetupCode, resendBetaInvite, revokeBetaInvite, saveBetaFeedback } from "../src/server/betaAccess.js";
 import { deleteUserAccount } from "../src/server/accountDeletion.js";
 import { getAiUsageSummary } from "../src/server/aiUsageSummary.js";
 import { claimLegacyArchive, legacyArchiveAvailable } from "../src/server/legacyArchive.js";
@@ -9,6 +9,14 @@ import type { UserProfile } from "../src/types.js";
 export default async function handler(req: any, res: any) {
   try {
     const authAction = String(req.query?.auth_action || "");
+
+    if (authAction === "beta-code") {
+      if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+      const action = String(req.body?.action || "");
+      if (action === "setup") return res.status(200).json(await redeemSetupCode(String(req.body?.email || ""), String(req.body?.code || ""), String(req.body?.password || "")));
+      if (action === "recovery") return res.status(200).json(await redeemRecoveryCode(String(req.body?.email || ""), String(req.body?.code || ""), String(req.body?.password || "")));
+      return res.status(400).json({ error: "Unknown beta code action" });
+    }
 
     if (authAction === "status") {
       if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
@@ -44,6 +52,7 @@ export default async function handler(req: any, res: any) {
       if (req.method === "POST") {
         const action = String(req.body?.action || "create");
         if (action === "resend") return res.status(200).json(await resendBetaInvite(user.id, Number(req.body?.invite_id)));
+        if (action === "recovery") return res.status(200).json(await createRecoveryCode(user.id, Number(req.body?.invite_id)));
         return res.status(201).json(await createBetaInvite(user.id, String(req.body?.email || "")));
       }
       if (req.method === "DELETE") return res.status(200).json(await revokeBetaInvite(user.id, Number(req.body?.invite_id)));
