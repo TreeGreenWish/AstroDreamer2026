@@ -1,8 +1,8 @@
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AuthenticatedRequestUser } from "./requestAuth.js";
 
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "") || "https://wgtagrrvnieuzheggsis.supabase.co";
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const appUrl = "https://astro-dreamer2026.vercel.app";
 
 function serviceHeaders(extra: Record<string, string> = {}) {
   if (!serviceRoleKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
@@ -25,73 +25,74 @@ async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
   return text ? JSON.parse(text) : (undefined as T);
 }
 
-function authEmailError(response: Response, body: string, action: string) {
-  let errorCode = "";
-  try {
-    const payload = JSON.parse(body);
-    errorCode = String(payload?.error_code || payload?.code || "");
-  } catch {
-    // Preserve raw response below.
-  }
-
-  if (response.status === 429 || errorCode === "over_email_send_rate_limit") {
-    const retryAfter = response.headers.get("retry-after");
-    const suffix = retryAfter ? ` Try again in about ${retryAfter} seconds.` : " Try again after the Supabase email cooldown resets.";
-    return Object.assign(new Error(`Supabase temporarily rate-limited auth emails.${suffix}`), {
-      status: 429,
-      code: "email_rate_limited",
-      retryAfter,
-    });
-  }
-
-  return Object.assign(new Error(`${action} (${response.status}): ${body}`), { status: response.status, code: errorCode || undefined });
-}
-
-async function sendMagicLink(email: string) {
-  const response = await fetch(`${supabaseUrl}/auth/v1/otp?redirect_to=${encodeURIComponent(appUrl)}`, {
-    method: "POST",
-    headers: serviceHeaders(),
-    body: JSON.stringify({ email, create_user: false }),
+async function authAdmin<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${supabaseUrl}/auth/v1/admin/${path}`, {
+    ...init,
+    headers: { ...serviceHeaders(), ...(init.headers || {}) },
   });
+  const text = await response.text();
   if (!response.ok) {
-    const body = await response.text();
-    throw authEmailError(response, body, "Could not send beta sign-in link");
+    let message = text || `Supabase Auth admin request failed (${response.status})`;
+    try {
+      const payload = JSON.parse(text);
+      message = payload?.msg || payload?.message || payload?.error_description || message;
+    } catch {
+      // Keep raw response.
+    }
+    throw Object.assign(new Error(message), { status: response.status });
   }
-  return { delivery: "magic_link" as const };
+  return text ? JSON.parse(text) : (undefined as T);
 }
 
-async function sendInviteEmail(email: string) {
-  const response = await fetch(`${supabaseUrl}/auth/v1/invite?redirect_to=${encodeURIComponent(appUrl)}`, {
-    method: "POST",
-    headers: serviceHeaders(),
-    body: JSON.stringify({ email, data: { source: "astradream_private_beta" } }),
-  });
-  if (response.ok) return { delivery: "invite" as const };
+function normalizeEmail(raw: string) {
+  const email = raw.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error("Enter a valid email address"), { status: 400 });
+  return email;
+}
 
-  const body = await response.text();
-  let errorCode = "";
-  try {
-    const payload = JSON.parse(body);
-    errorCode = String(payload?.error_code || payload?.code || "");
-  } catch {
-    // Preserve raw response below.
-  }
+function validatePassword(password: string) {
+  if (password.length < 8) throw Object.assign(new Error("Password must be at least 8 characters"), { status: 400 });
+}
 
-  // Supabase's admin invite endpoint cannot send a second invite once an Auth
-  // record exists. For invited users who have not finished onboarding, send a
-  // passwordless sign-in link instead. It verifies/signs them in through their
-  // own email and returns them to AstraDream; no manual account intervention.
-  if (response.status === 422 && errorCode === "email_exists") {
-    return sendMagicLink(email);
-  }
+function newCode() {
+  return randomBytes(18).toString("base64url");
+}
 
-  throw authEmailError(response, body, "Could not send beta invitation email");
+function hashCode(code: string) {
+  return createHash("sha256").update(code.trim()).digest("hex");
+}
+
+function validCode(raw: string, storedHash?: string | null) {
+  if (!raw || !storedHash) return false;
+  const candidate = Buffer.from(hashCode(raw), "hex");
+  const expected = Buffer.from(storedHash, "hex");
+  return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+}
+
+function ensureNotExpired(value?: string | null) {
+  return Boolean(value && new Date(value).getTime() > Date.now());
 }
 
 export type BetaAccess = {
   profileExists: boolean;
   invited: boolean;
   inviteAccepted: boolean;
+};
+
+type InviteRow = {
+  id: number;
+  email: string;
+  auth_user_id?: string | null;
+  invited_at: string;
+  accepted_at?: string | null;
+  accepted_by?: string | null;
+  revoked_at?: string | null;
+  setup_code_hash?: string | null;
+  setup_code_expires_at?: string | null;
+  setup_code_used_at?: string | null;
+  recovery_code_hash?: string | null;
+  recovery_code_expires_at?: string | null;
+  recovery_code_used_at?: string | null;
 };
 
 export async function isBetaOwner(userId: string) {
@@ -128,7 +129,7 @@ export async function acceptBetaInvite(user: AuthenticatedRequestUser) {
   await rest(`beta_invites?id=eq.${invite.id}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ accepted_at: new Date().toISOString(), accepted_by: user.id }),
+    body: JSON.stringify({ accepted_at: new Date().toISOString(), accepted_by: user.id, auth_user_id: user.id }),
   });
 }
 
@@ -141,72 +142,177 @@ export async function requireBetaAccess(user: AuthenticatedRequestUser) {
 }
 
 export async function createBetaInvite(ownerUserId: string, rawEmail: string) {
-  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can invite beta testers"), { status: 403 });
-  const email = rawEmail.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error("Enter a valid email address"), { status: 400 });
-  const existing = await rest<Array<{ id: number; revoked_at?: string | null; accepted_at?: string | null }>>(`beta_invites?email=ilike.${encodeURIComponent(email)}&select=id,revoked_at,accepted_at&limit=1`);
-  if (existing[0]?.accepted_at) throw Object.assign(new Error("That tester has already joined the private beta"), { status: 409 });
+  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can create beta access codes"), { status: 403 });
+  const email = normalizeEmail(rawEmail);
+  const existing = await rest<InviteRow[]>(`beta_invites?email=ilike.${encodeURIComponent(email)}&select=*&limit=1`);
+  if (existing[0]?.accepted_at) throw Object.assign(new Error("That tester has already joined. Generate a recovery code instead."), { status: 409 });
 
-  // Send first. Only mark the invitation as freshly sent after Supabase accepts
-  // the email request, so 429s never make the UI claim a resend succeeded.
-  const delivery = await sendInviteEmail(email);
+  const code = newCode();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const invitedAt = new Date().toISOString();
+  const patch = {
+    revoked_at: null,
+    invited_at: invitedAt,
+    accepted_at: null,
+    accepted_by: null,
+    setup_code_hash: hashCode(code),
+    setup_code_expires_at: expiresAt,
+    setup_code_used_at: null,
+  };
   if (existing[0]?.id) {
     await rest(`beta_invites?id=eq.${existing[0].id}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ revoked_at: null, invited_at: invitedAt, accepted_at: null, accepted_by: null }),
+      body: JSON.stringify(patch),
     });
   } else {
     await rest("beta_invites", {
       method: "POST",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ email, invited_at: invitedAt }),
+      body: JSON.stringify({ email, ...patch }),
     });
   }
-  return { email, emailed: true, ...delivery };
+  return { email, code, expires_at: expiresAt };
 }
 
 export async function resendBetaInvite(ownerUserId: string, inviteId: number) {
-  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can resend beta invitations"), { status: 403 });
-  const rows = await rest<Array<{ id: number; email: string; accepted_at?: string | null; revoked_at?: string | null }>>(
-    `beta_invites?id=eq.${inviteId}&select=id,email,accepted_at,revoked_at&limit=1`,
-  );
+  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can regenerate setup codes"), { status: 403 });
+  const rows = await rest<InviteRow[]>(`beta_invites?id=eq.${inviteId}&select=*&limit=1`);
   const invite = rows[0];
-  if (!invite) throw Object.assign(new Error("Invitation not found"), { status: 404 });
-  if (invite.accepted_at) throw Object.assign(new Error("That tester has already joined"), { status: 409 });
+  if (!invite) throw Object.assign(new Error("Tester not found"), { status: 404 });
+  if (invite.accepted_at) throw Object.assign(new Error("That tester has already joined. Generate a recovery code instead."), { status: 409 });
 
-  const delivery = await sendInviteEmail(invite.email);
-  const invitedAt = new Date().toISOString();
+  const code = newCode();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   await rest(`beta_invites?id=eq.${invite.id}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ revoked_at: null, invited_at: invitedAt, accepted_at: null, accepted_by: null }),
+    body: JSON.stringify({
+      revoked_at: null,
+      invited_at: new Date().toISOString(),
+      setup_code_hash: hashCode(code),
+      setup_code_expires_at: expiresAt,
+      setup_code_used_at: null,
+    }),
   });
-  return { email: invite.email, emailed: true, ...delivery };
+  return { email: invite.email, code, expires_at: expiresAt };
+}
+
+export async function createRecoveryCode(ownerUserId: string, inviteId: number) {
+  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can create recovery codes"), { status: 403 });
+  const rows = await rest<InviteRow[]>(`beta_invites?id=eq.${inviteId}&select=*&limit=1`);
+  const invite = rows[0];
+  if (!invite) throw Object.assign(new Error("Tester not found"), { status: 404 });
+  if (invite.revoked_at) throw Object.assign(new Error("That tester is currently removed from the beta"), { status: 409 });
+  if (!invite.auth_user_id) throw Object.assign(new Error("This tester does not have an Auth account yet. Give them a setup code instead."), { status: 409 });
+
+  const code = newCode();
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  await rest(`beta_invites?id=eq.${invite.id}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      recovery_code_hash: hashCode(code),
+      recovery_code_expires_at: expiresAt,
+      recovery_code_used_at: null,
+    }),
+  });
+  return { email: invite.email, code, expires_at: expiresAt };
+}
+
+export async function redeemSetupCode(rawEmail: string, rawCode: string, password: string) {
+  const email = normalizeEmail(rawEmail);
+  validatePassword(password);
+  const rows = await rest<InviteRow[]>(`beta_invites?email=ilike.${encodeURIComponent(email)}&revoked_at=is.null&select=*&limit=1`);
+  const invite = rows[0];
+  if (!invite || invite.setup_code_used_at || !ensureNotExpired(invite.setup_code_expires_at) || !validCode(rawCode, invite.setup_code_hash)) {
+    throw Object.assign(new Error("That setup code is invalid or expired"), { status: 403 });
+  }
+
+  let userId = invite.auth_user_id || null;
+  if (userId) {
+    await authAdmin(`users/${encodeURIComponent(userId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ password, email_confirm: true }),
+    });
+  } else {
+    const created = await authAdmin<{ id?: string; user?: { id?: string } }>("users", {
+      method: "POST",
+      body: JSON.stringify({ email, password, email_confirm: true }),
+    });
+    userId = created?.id || created?.user?.id || null;
+    if (!userId) throw new Error("Supabase created the beta account but did not return its user ID");
+  }
+
+  await rest(`beta_invites?id=eq.${invite.id}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      auth_user_id: userId,
+      setup_code_used_at: new Date().toISOString(),
+      setup_code_hash: null,
+    }),
+  });
+  return { email, ready: true };
+}
+
+export async function redeemRecoveryCode(rawEmail: string, rawCode: string, password: string) {
+  const email = normalizeEmail(rawEmail);
+  validatePassword(password);
+  const rows = await rest<InviteRow[]>(`beta_invites?email=ilike.${encodeURIComponent(email)}&revoked_at=is.null&select=*&limit=1`);
+  const invite = rows[0];
+  if (!invite?.auth_user_id || invite.recovery_code_used_at || !ensureNotExpired(invite.recovery_code_expires_at) || !validCode(rawCode, invite.recovery_code_hash)) {
+    throw Object.assign(new Error("That recovery code is invalid or expired"), { status: 403 });
+  }
+
+  await authAdmin(`users/${encodeURIComponent(invite.auth_user_id)}`, {
+    method: "PUT",
+    body: JSON.stringify({ password, email_confirm: true }),
+  });
+  await rest(`beta_invites?id=eq.${invite.id}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      recovery_code_used_at: new Date().toISOString(),
+      recovery_code_hash: null,
+    }),
+  });
+  return { email, ready: true };
 }
 
 export async function revokeBetaInvite(ownerUserId: string, inviteId: number) {
-  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can remove beta invitations"), { status: 403 });
-  const rows = await rest<Array<{ id: number; email: string; accepted_at?: string | null }>>(
-    `beta_invites?id=eq.${inviteId}&select=id,email,accepted_at&limit=1`,
-  );
+  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can remove beta testers"), { status: 403 });
+  const rows = await rest<InviteRow[]>(`beta_invites?id=eq.${inviteId}&select=*&limit=1`);
   const invite = rows[0];
-  if (!invite) throw Object.assign(new Error("Invitation not found"), { status: 404 });
+  if (!invite) throw Object.assign(new Error("Tester not found"), { status: 404 });
   if (invite.accepted_at) throw Object.assign(new Error("This tester has already joined. Removing their account requires the separate account-removal flow."), { status: 409 });
   await rest(`beta_invites?id=eq.${invite.id}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+    body: JSON.stringify({
+      revoked_at: new Date().toISOString(),
+      setup_code_hash: null,
+      recovery_code_hash: null,
+    }),
   });
   return { email: invite.email, revoked: true };
 }
 
 export async function listBetaInvites(ownerUserId: string) {
-  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can view beta invitations"), { status: 403 });
-  return rest<Array<{ id: number; email: string; invited_at: string; accepted_at?: string | null; revoked_at?: string | null }>>(
-    "beta_invites?select=id,email,invited_at,accepted_at,revoked_at&order=invited_at.desc",
+  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can view beta testers"), { status: 403 });
+  const rows = await rest<InviteRow[]>(
+    "beta_invites?select=id,email,auth_user_id,invited_at,accepted_at,revoked_at,setup_code_expires_at,setup_code_used_at,recovery_code_expires_at,recovery_code_used_at&order=invited_at.desc",
   );
+  return rows.map(row => ({
+    id: row.id,
+    email: row.email,
+    invited_at: row.invited_at,
+    accepted_at: row.accepted_at,
+    revoked_at: row.revoked_at,
+    has_account: Boolean(row.auth_user_id),
+    setup_pending: Boolean(row.setup_code_expires_at && !row.setup_code_used_at && new Date(row.setup_code_expires_at).getTime() > Date.now()),
+    recovery_pending: Boolean(row.recovery_code_expires_at && !row.recovery_code_used_at && new Date(row.recovery_code_expires_at).getTime() > Date.now()),
+  }));
 }
 
 export async function saveBetaFeedback(userId: string, category: string, message: string, page?: string) {
