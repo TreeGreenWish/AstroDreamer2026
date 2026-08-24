@@ -25,16 +25,45 @@ async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
   return text ? JSON.parse(text) : (undefined as T);
 }
 
+async function sendMagicLink(email: string) {
+  const response = await fetch(`${supabaseUrl}/auth/v1/otp?redirect_to=${encodeURIComponent(appUrl)}`, {
+    method: "POST",
+    headers: serviceHeaders(),
+    body: JSON.stringify({ email, create_user: false }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw Object.assign(new Error(`Could not send beta sign-in link (${response.status}): ${body}`), { status: response.status });
+  }
+  return { delivery: "magic_link" as const };
+}
+
 async function sendInviteEmail(email: string) {
   const response = await fetch(`${supabaseUrl}/auth/v1/invite?redirect_to=${encodeURIComponent(appUrl)}`, {
     method: "POST",
     headers: serviceHeaders(),
     body: JSON.stringify({ email, data: { source: "astradream_private_beta" } }),
   });
-  if (!response.ok) {
-    const body = await response.text();
-    throw Object.assign(new Error(`Could not send beta invitation email (${response.status}): ${body}`), { status: response.status });
+  if (response.ok) return { delivery: "invite" as const };
+
+  const body = await response.text();
+  let errorCode = "";
+  try {
+    const payload = JSON.parse(body);
+    errorCode = String(payload?.error_code || payload?.code || "");
+  } catch {
+    // Keep the raw response for the error below.
   }
+
+  // Supabase's admin invite endpoint cannot send a second invite once an Auth
+  // record exists. For invited users who have not finished onboarding, send a
+  // passwordless sign-in link instead. It verifies/signs them in through their
+  // own email and returns them to AstraDream; no manual account intervention.
+  if (response.status === 422 && errorCode === "email_exists") {
+    return sendMagicLink(email);
+  }
+
+  throw Object.assign(new Error(`Could not send beta invitation email (${response.status}): ${body}`), { status: response.status });
 }
 
 export type BetaAccess = {
@@ -109,8 +138,8 @@ export async function createBetaInvite(ownerUserId: string, rawEmail: string) {
       body: JSON.stringify({ email, invited_at: invitedAt }),
     });
   }
-  await sendInviteEmail(email);
-  return { email, emailed: true };
+  const delivery = await sendInviteEmail(email);
+  return { email, emailed: true, ...delivery };
 }
 
 export async function resendBetaInvite(ownerUserId: string, inviteId: number) {
@@ -127,8 +156,8 @@ export async function resendBetaInvite(ownerUserId: string, inviteId: number) {
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({ revoked_at: null, invited_at: invitedAt, accepted_at: null, accepted_by: null }),
   });
-  await sendInviteEmail(invite.email);
-  return { email: invite.email, emailed: true };
+  const delivery = await sendInviteEmail(invite.email);
+  return { email: invite.email, emailed: true, ...delivery };
 }
 
 export async function revokeBetaInvite(ownerUserId: string, inviteId: number) {
