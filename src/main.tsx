@@ -4,7 +4,7 @@ import './lib/localDateOnly';
 import App from './App.tsx';
 import DreamAiRetryControls from './components/DreamAiRetryControls';
 import { ExportJournalButton } from './components/ExportJournalButton';
-import { AuthGate } from './components/AuthGate';
+import { AuthGate } from './components/AuthGateV2';
 import UnknownDreamTimeSupport from './components/UnknownDreamTimeSupport';
 import { ProfileAccountControls } from './components/ProfileAccountControls';
 import './index.css';
