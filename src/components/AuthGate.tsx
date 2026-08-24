@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { KeyRound, Loader2, LogOut, MessageSquare, Moon, ShieldCheck, UserPlus } from 'lucide-react';
 import { consumeAuthRedirect, getAccessToken, getCurrentUser, requestPasswordReset, signIn, signOut, signUp, updatePassword } from '../lib/authClient';
 
-type AuthUser = { id: string; email?: string };
+type AuthUser = { id: string; email?: string; user_metadata?: Record<string, unknown> };
 type AuthStatus = { authenticated: boolean; profile_exists: boolean; legacy_archive_available: boolean; invited?: boolean; invite_accepted?: boolean; is_owner?: boolean };
 type Invite = { id: number; email: string; invited_at: string; accepted_at?: string | null; revoked_at?: string | null };
 
@@ -54,6 +54,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   const needsClaim = Boolean(user && status?.legacy_archive_available && !status?.profile_exists);
   const betaLocked = Boolean(user && status && !status.profile_exists && !status.legacy_archive_available && !status.invited);
+  const needsPasswordSetup = Boolean(
+    user &&
+    status?.invited &&
+    !status.profile_exists &&
+    !status.legacy_archive_available &&
+    user.user_metadata?.astradream_password_ready !== true
+  );
 
   useEffect(() => {
     installAuthenticatedFetch();
@@ -111,6 +118,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       const current = await getCurrentUser(); setUser(current); if (current) await refreshStatus();
       setMessage('Password updated successfully.');
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Password update failed'); }
+    finally { setWorking(false); }
+  }
+
+  async function finishAccountSetup(event: React.FormEvent) {
+    event.preventDefault(); setWorking(true); setMessage('');
+    try {
+      await updatePassword(newPassword, true);
+      setNewPassword('');
+      const current = await getCurrentUser();
+      setUser(current);
+      if (current) await refreshStatus();
+      setMessage('Password saved. Your AstraDream account is ready.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not finish account setup'); }
     finally { setWorking(false); }
   }
 
@@ -186,6 +206,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (needsClaim) return <Shell><ShieldCheck className="w-12 h-12 text-gold mx-auto mb-4" /><h1 className="text-2xl font-serif text-white text-center mb-3">Claim your existing archive</h1><p className="text-white/50 text-sm text-center mb-6">Enter the one-time archive claim code.</p><form onSubmit={claimArchive} className="space-y-4"><input required value={claimCode} onChange={e => setClaimCode(e.target.value)} placeholder="Archive claim code" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white font-mono" /><button disabled={working} className="w-full bg-gold text-deep-blue font-bold py-3 rounded-xl">Claim archive</button></form>{message && <p className="text-sm text-white/60 mt-4 text-center">{message}</p>}</Shell>;
 
   if (betaLocked) return <Shell><ShieldCheck className="w-12 h-12 text-gold mx-auto mb-4" /><h1 className="text-2xl font-serif text-white text-center mb-3">Private beta</h1><p className="text-white/50 text-sm text-center">This account is valid, but its email has not been invited into AstraDream yet.</p><button onClick={handleSignOut} className="w-full mt-6 rounded-xl border border-white/10 py-3 text-sm text-white/60">Sign out</button></Shell>;
+
+  if (needsPasswordSetup) return <Shell><KeyRound className="w-12 h-12 text-gold mx-auto mb-4" /><h1 className="text-2xl font-serif text-white text-center mb-3">Finish account setup</h1><p className="text-white/50 text-sm text-center mb-6">Your invitation is verified. Choose the password you’ll use to sign back in to AstraDream. This does not send another email.</p><form onSubmit={finishAccountSetup} className="space-y-4"><input required minLength={8} type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Choose a password" autoComplete="new-password" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/50" /><button disabled={working} className="w-full bg-gold text-deep-blue font-bold py-3 rounded-xl">Save password & continue</button></form>{message && <p className="text-sm text-white/60 mt-4 text-center">{message}</p>}<button onClick={handleSignOut} className="w-full text-xs text-white/40 mt-5">Sign out</button></Shell>;
 
   if (panel === 'password') return <Shell><KeyRound className="w-12 h-12 text-gold mx-auto mb-4" /><h1 className="text-2xl font-serif text-white text-center mb-3">Change password</h1><form onSubmit={saveNewPassword} className="space-y-4"><input required minLength={8} type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="New password" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white" /><button disabled={working} className="w-full bg-gold text-deep-blue font-bold py-3 rounded-xl">Update password</button></form><button onClick={() => setPanel(null)} className="w-full text-xs text-white/40 mt-5">Back to journal</button></Shell>;
 
