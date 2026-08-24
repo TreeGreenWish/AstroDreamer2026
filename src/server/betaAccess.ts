@@ -2,6 +2,7 @@ import type { AuthenticatedRequestUser } from "./requestAuth.js";
 
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "") || "https://wgtagrrvnieuzheggsis.supabase.co";
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const appUrl = "https://astro-dreamer2026.vercel.app";
 
 function serviceHeaders(extra: Record<string, string> = {}) {
   if (!serviceRoleKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
@@ -22,6 +23,18 @@ async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   return text ? JSON.parse(text) : (undefined as T);
+}
+
+async function sendInviteEmail(email: string) {
+  const response = await fetch(`${supabaseUrl}/auth/v1/invite`, {
+    method: "POST",
+    headers: serviceHeaders(),
+    body: JSON.stringify({ email, data: { source: "astradream_private_beta" } }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw Object.assign(new Error(`Could not send beta invitation email (${response.status}): ${body}`), { status: response.status });
+  }
 }
 
 export type BetaAccess = {
@@ -80,21 +93,58 @@ export async function createBetaInvite(ownerUserId: string, rawEmail: string) {
   if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can invite beta testers"), { status: 403 });
   const email = rawEmail.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error("Enter a valid email address"), { status: 400 });
-  const existing = await rest<Array<{ id: number; revoked_at?: string | null }>>(`beta_invites?email=ilike.${encodeURIComponent(email)}&select=id,revoked_at&limit=1`);
+  const existing = await rest<Array<{ id: number; revoked_at?: string | null; accepted_at?: string | null }>>(`beta_invites?email=ilike.${encodeURIComponent(email)}&select=id,revoked_at,accepted_at&limit=1`);
+  if (existing[0]?.accepted_at) throw Object.assign(new Error("That tester has already joined the private beta"), { status: 409 });
+  const invitedAt = new Date().toISOString();
   if (existing[0]?.id) {
     await rest(`beta_invites?id=eq.${existing[0].id}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ revoked_at: null, invited_at: new Date().toISOString() }),
+      body: JSON.stringify({ revoked_at: null, invited_at: invitedAt, accepted_at: null, accepted_by: null }),
     });
   } else {
     await rest("beta_invites", {
       method: "POST",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, invited_at: invitedAt }),
     });
   }
-  return { email };
+  await sendInviteEmail(email);
+  return { email, emailed: true };
+}
+
+export async function resendBetaInvite(ownerUserId: string, inviteId: number) {
+  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can resend beta invitations"), { status: 403 });
+  const rows = await rest<Array<{ id: number; email: string; accepted_at?: string | null; revoked_at?: string | null }>>(
+    `beta_invites?id=eq.${inviteId}&select=id,email,accepted_at,revoked_at&limit=1`,
+  );
+  const invite = rows[0];
+  if (!invite) throw Object.assign(new Error("Invitation not found"), { status: 404 });
+  if (invite.accepted_at) throw Object.assign(new Error("That tester has already joined"), { status: 409 });
+  const invitedAt = new Date().toISOString();
+  await rest(`beta_invites?id=eq.${invite.id}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ revoked_at: null, invited_at: invitedAt, accepted_at: null, accepted_by: null }),
+  });
+  await sendInviteEmail(invite.email);
+  return { email: invite.email, emailed: true };
+}
+
+export async function revokeBetaInvite(ownerUserId: string, inviteId: number) {
+  if (!(await isBetaOwner(ownerUserId))) throw Object.assign(new Error("Only the AstraDream owner can remove beta invitations"), { status: 403 });
+  const rows = await rest<Array<{ id: number; email: string; accepted_at?: string | null }>>(
+    `beta_invites?id=eq.${inviteId}&select=id,email,accepted_at&limit=1`,
+  );
+  const invite = rows[0];
+  if (!invite) throw Object.assign(new Error("Invitation not found"), { status: 404 });
+  if (invite.accepted_at) throw Object.assign(new Error("This tester has already joined. Removing their account requires the separate account-removal flow."), { status: 409 });
+  await rest(`beta_invites?id=eq.${invite.id}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+  });
+  return { email: invite.email, revoked: true };
 }
 
 export async function listBetaInvites(ownerUserId: string) {
