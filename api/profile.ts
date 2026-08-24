@@ -1,5 +1,5 @@
 import { dataStore } from "../src/server/dataStore.js";
-import { acceptBetaInvite, createBetaInvite, getBetaAccess, isBetaOwner, listBetaInvites, saveBetaFeedback } from "../src/server/betaAccess.js";
+import { acceptBetaInvite, createBetaInvite, getBetaAccess, isBetaOwner, listBetaInvites, resendBetaInvite, revokeBetaInvite, saveBetaFeedback } from "../src/server/betaAccess.js";
 import { deleteUserAccount } from "../src/server/accountDeletion.js";
 import { getAiUsageSummary } from "../src/server/aiUsageSummary.js";
 import { claimLegacyArchive, legacyArchiveAvailable } from "../src/server/legacyArchive.js";
@@ -41,7 +41,12 @@ export default async function handler(req: any, res: any) {
     if (authAction === "invite") {
       const user = await requirePrivateBetaUser(req);
       if (req.method === "GET") return res.status(200).json(await listBetaInvites(user.id));
-      if (req.method === "POST") return res.status(201).json(await createBetaInvite(user.id, String(req.body?.email || "")));
+      if (req.method === "POST") {
+        const action = String(req.body?.action || "create");
+        if (action === "resend") return res.status(200).json(await resendBetaInvite(user.id, Number(req.body?.invite_id)));
+        return res.status(201).json(await createBetaInvite(user.id, String(req.body?.email || "")));
+      }
+      if (req.method === "DELETE") return res.status(200).json(await revokeBetaInvite(user.id, Number(req.body?.invite_id)));
       return res.status(405).json({ error: "Method not allowed" });
     }
 
