@@ -3,7 +3,7 @@ const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_6XhsHFkPQukuQineOtvLeQ_14GlU3BT
 const STORAGE_KEY = 'astradream.auth.session.v1';
 const PRODUCTION_APP_URL = 'https://astro-dreamer2026.vercel.app/';
 
-type SupabaseUser = { id: string; email?: string };
+type SupabaseUser = { id: string; email?: string; user_metadata?: Record<string, unknown> };
 
 type StoredSession = {
   access_token: string;
@@ -90,7 +90,7 @@ export async function signIn(email: string, password: string) {
 export async function signUp(email: string, password: string) {
   const response = await authRequest(`/auth/v1/signup?redirect_to=${encodeURIComponent(PRODUCTION_APP_URL)}`, {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, data: { astradream_password_ready: true } }),
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload?.msg || payload?.error_description || payload?.message || 'Sign up failed');
@@ -110,13 +110,16 @@ export async function requestPasswordReset(email: string) {
   if (!response.ok) throw new Error(payload?.msg || payload?.error_description || payload?.message || 'Password reset request failed');
 }
 
-export async function updatePassword(password: string) {
+export async function updatePassword(password: string, markSetupComplete = true) {
   const current = await getSession();
   if (!current) throw new Error('A valid recovery or sign-in session is required');
   const response = await authRequest('/auth/v1/user', {
     method: 'PUT',
     headers: { Authorization: `Bearer ${current.access_token}` },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({
+      password,
+      ...(markSetupComplete ? { data: { astradream_password_ready: true } } : {}),
+    }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.msg || payload?.error_description || payload?.message || 'Password update failed');
