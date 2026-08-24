@@ -26,7 +26,7 @@ async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 async function sendInviteEmail(email: string) {
-  const response = await fetch(`${supabaseUrl}/auth/v1/invite`, {
+  const response = await fetch(`${supabaseUrl}/auth/v1/invite?redirect_to=${encodeURIComponent(appUrl)}`, {
     method: "POST",
     headers: serviceHeaders(),
     body: JSON.stringify({ email, data: { source: "astradream_private_beta" } }),
