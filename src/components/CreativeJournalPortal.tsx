@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, ChevronLeft, Loader2, PenLine, Plus, Save, Sparkles, Trash2, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, Loader2, Plus, Sparkles, Trash2, X } from 'lucide-react';
 
 type CreativeStatus = 'seed' | 'draft' | 'developing' | 'finished';
 type CreativeEntry = {
@@ -43,12 +43,18 @@ export default function CreativeJournalPortal() {
   const dirtyRef = useRef(false);
 
   useEffect(() => {
-    const handler = () => setLatestPrompt(readLatestPrompt());
-    window.addEventListener('astradream:creative-prompt', handler);
-    return () => window.removeEventListener('astradream:creative-prompt', handler);
+    const promptHandler = () => setLatestPrompt(readLatestPrompt());
+    const openHandler = () => setOpen(true);
+    window.addEventListener('astradream:creative-prompt', promptHandler);
+    window.addEventListener('astradream:open-creative', openHandler);
+    return () => {
+      window.removeEventListener('astradream:creative-prompt', promptHandler);
+      window.removeEventListener('astradream:open-creative', openHandler);
+    };
   }, []);
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('astradream:creative-open-state', { detail: { open } }));
     if (!open) return;
     void loadEntries();
   }, [open]);
@@ -58,13 +64,14 @@ export default function CreativeJournalPortal() {
     const timer = window.setTimeout(async () => {
       try {
         setSaveState('saving');
-        const saved = await api<CreativeEntry>(`/api/creative/${selected.id}`, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(selected),
+        const saved = await api<CreativeEntry>('/api/creative', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...selected, id: selected.id }),
         });
         dirtyRef.current = false;
         setSelected(saved);
         setEntries(prev => prev.map(e => e.id === saved.id ? saved : e));
         setSaveState('saved');
+        setError('');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Autosave failed');
         setSaveState('dirty');
@@ -113,7 +120,7 @@ export default function CreativeJournalPortal() {
   async function removeSelected() {
     if (!selected?.id || !confirm('Delete this creative entry?')) return;
     try {
-      await api(`/api/creative/${selected.id}`, { method: 'DELETE' });
+      await api('/api/creative', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: selected.id }) });
       setEntries(prev => prev.filter(e => e.id !== selected.id));
       setSelected(null);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not delete entry'); }
@@ -121,13 +128,7 @@ export default function CreativeJournalPortal() {
 
   const revisit = useMemo(() => entries.filter(e => e.status !== 'finished').slice().sort((a,b) => new Date(a.updated_at || 0).getTime() - new Date(b.updated_at || 0).getTime())[0], [entries]);
 
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} className="fixed bottom-24 right-6 z-[65] flex items-center gap-2 rounded-full border border-gold/25 bg-black/60 px-4 py-3 text-xs font-bold uppercase tracking-widest text-gold backdrop-blur-md hover:bg-gold/10" title="Creative Journal">
-        <PenLine className="h-4 w-4" /> <span className="hidden sm:inline">Creative</span>
-      </button>
-    );
-  }
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[100] bg-[#0a0502]/98 overflow-y-auto">
