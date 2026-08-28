@@ -58,6 +58,13 @@ export function generateInsights(dreams: Dream[]) {
   return postAi<string[]>("insights", { dreams });
 }
 
-export function generateCreativePrompt(dreams: Dream[], insights: string[]) {
-  return postAi<{ prompt: string; dreamId: number | null; type: string }>("creative-prompt", { dreams, insights });
+export async function generateCreativePrompt(dreams: Dream[], insights: string[]) {
+  const result = await postAi<{ prompt: string; dreamId: number | null; type: string }>("creative-prompt", { dreams, insights });
+  try {
+    localStorage.setItem('astradream:latest-creative-prompt', JSON.stringify(result));
+    window.dispatchEvent(new CustomEvent('astradream:creative-prompt', { detail: result }));
+  } catch {
+    // Creative prompt persistence is a convenience; generation should still succeed if storage is unavailable.
+  }
+  return result;
 }
