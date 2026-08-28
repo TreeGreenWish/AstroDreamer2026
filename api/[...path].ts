@@ -67,6 +67,10 @@ export default async function handler(req: any, res: any) {
       if (parts.length === 1) {
         if (method === "GET") return res.status(200).json(await listCreativeEntries(user.id));
         if (method === "POST") return res.status(201).json(await createCreativeEntry(user.id, body));
+        const id = Number(body?.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid creative entry id" });
+        if (method === "PUT") return res.status(200).json(await updateCreativeEntry(user.id, id, body));
+        if (method === "DELETE") { await deleteCreativeEntry(user.id, id); return res.status(200).json({ success: true }); }
         return res.status(405).json({ error: "Method not allowed" });
       }
       const id = Number(parts[1]);
