@@ -8,6 +8,7 @@ import { AuthGate } from './components/AuthGateV2';
 import UnknownDreamTimeSupport from './components/UnknownDreamTimeSupport';
 import { ProfileAccountControls } from './components/ProfileAccountControls';
 import CreativeJournalPortal from './components/CreativeJournalPortal';
+import CreativeNavBridge from './components/CreativeNavBridge';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -19,6 +20,7 @@ createRoot(document.getElementById('root')!).render(
       <DreamAiRetryControls />
       <ExportJournalButton />
       <CreativeJournalPortal />
+      <CreativeNavBridge />
     </AuthGate>
   </StrictMode>,
 );
