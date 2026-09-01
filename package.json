@@ -8,12 +8,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "migrate:sqlite:check": "tsx scripts/migrateSqliteToSupabase.ts",
+    "migrate:sqlite": "tsx scripts/migrateSqliteToSupabase.ts --execute"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "astronomy-engine": "2.1.19",
     "better-sqlite3": "^12.4.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",

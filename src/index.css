@@ -54,6 +54,11 @@ body {
 .markdown-body li { @apply mb-1; }
 .markdown-body strong { @apply text-white font-semibold; }
 
+/* Password changes belong on Profile/login, not in the floating account chrome. */
+button[title="Change password"] {
+  display: none !important;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

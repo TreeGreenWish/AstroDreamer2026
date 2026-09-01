@@ -1,5 +1,35 @@
+export interface PersonalContextFact {
+  subject: string;
+  predicate: string;
+  value: string;
+  confidence: 'explicit' | 'inferred';
+  source_dream_id?: number;
+  source_note_timestamp?: string;
+  updated_at?: string;
+}
+
+export interface DreamRevisit {
+  id: string;
+  created_at: string;
+  note_count: number;
+  context_facts: PersonalContextFact[];
+  changed_understanding: string;
+  revised_summary: string;
+  revised_interpretation: string;
+  changed_symbols: Array<{
+    name: string;
+    previous_reading: string;
+    updated_reading: string;
+    why: string;
+  }>;
+  preserved_points: string[];
+  reflection_questions: string[];
+  uncertainty_notes: string[];
+}
+
 export interface UserProfile {
   id?: number;
+  user_id?: string | null;
   name: string;
   dob: string; // YYYY-MM-DD
   tob: string; // HH:mm
@@ -20,6 +50,8 @@ export interface UserProfile {
   neptune_sign?: string;
   pluto_sign?: string;
   rising_sign?: string;
+  context_memory?: PersonalContextFact[];
+  context_memory_version?: number;
 }
 
 export interface NoteEntry {
@@ -27,15 +59,93 @@ export interface NoteEntry {
   timestamp: string; // ISO string
 }
 
+export interface DreamSymbolFeature {
+  name: string;
+  context: string;
+  possible_meanings: string[];
+  confidence: 'low' | 'medium' | 'high';
+}
+
+export interface DreamCharacterFeature {
+  name: string;
+  role: string;
+  relationship_or_association?: string;
+}
+
+export interface DreamEmotionFeature {
+  emotion: string;
+  intensity: 'low' | 'medium' | 'high';
+  context: string;
+}
+
+export interface DreamAnalysisV1 {
+  version: 1;
+  summary: string;
+  core_interpretation: string;
+  themes: string[];
+  symbols: DreamSymbolFeature[];
+  characters: DreamCharacterFeature[];
+  locations: Array<{ name: string; significance: string }>;
+  emotions: DreamEmotionFeature[];
+  transformations: string[];
+  tensions: string[];
+  alternative_readings: string[];
+  reflection_questions: string[];
+  uncertainty_notes: string[];
+}
+
+export interface DreamFeaturesV1 {
+  version: 1;
+  themes: string[];
+  symbols: string[];
+  characters: string[];
+  locations: string[];
+  emotions: string[];
+  transformations: string[];
+  objects: string[];
+  actions: string[];
+}
+
+export interface AstrologyBodyFact {
+  longitude: number;
+  sign: string;
+  degree_in_sign: number;
+  retrograde: boolean;
+}
+
+export interface DreamAstrologyV1 {
+  version: 1;
+  calculated_at?: string;
+  source: string;
+  time_precision?: 'exact' | 'date_only';
+  time_known?: boolean;
+  bodies: Record<string, AstrologyBodyFact>;
+  reliable_signs?: Record<string, string>;
+  uncertain_bodies?: string[];
+  moon_phase?: string;
+  moon_illumination?: number;
+  aspects?: Array<{
+    planet1: string;
+    planet2: string;
+    aspect: 'conjunction' | 'sextile' | 'square' | 'trine' | 'opposition';
+    orb: number;
+  }>;
+}
+
+export type DreamEnrichmentStatus = 'raw' | 'interpreting' | 'interpreted' | 'image_failed' | 'complete';
+
 export interface Dream {
   id?: number;
+  user_id?: string | null;
   title: string;
   content: string;
   date: string; // YYYY-MM-DD
-  time: string; // HH:mm
+  time: string | null; // HH:mm when known; null when unknown
+  time_known?: boolean;
   location_lat: number;
   location_lng: number;
   location_name: string;
+  timezone_name?: string;
   interpretation?: string;
   image_url?: string;
   sun_sign?: string;
@@ -64,5 +174,19 @@ export interface Dream {
   };
   tags?: string[];
   notes?: NoteEntry[];
+  analysis_json?: DreamAnalysisV1 | null;
+  analysis_version?: number | null;
+  astrology_json?: DreamAstrologyV1 | null;
+  astrology_version?: number | null;
+  feature_json?: DreamFeaturesV1 | null;
+  feature_version?: number | null;
+  context_facts?: PersonalContextFact[];
+  revisits?: DreamRevisit[];
+  enrichment_status?: DreamEnrichmentStatus;
+  interpreted_at?: string;
+  image_generated_at?: string;
+  interpretation_error?: string | null;
+  image_error?: string | null;
   created_at?: string;
+  updated_at?: string;
 }
