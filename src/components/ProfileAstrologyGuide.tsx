@@ -23,6 +23,7 @@ export default function ProfileAstrologyGuide() {
   const [data, setData] = useState<Guidance | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -40,7 +41,8 @@ export default function ProfileAstrologyGuide() {
   }, []);
 
   useEffect(() => {
-    if (!active || data || loading) return;
+    if (!active || data || loading || attempted) return;
+    setAttempted(true);
     (async () => {
       try {
         setLoading(true); setError('');
@@ -53,7 +55,7 @@ export default function ProfileAstrologyGuide() {
         setError(e instanceof Error ? e.message : 'Could not load astrology guide');
       } finally { setLoading(false); }
     })();
-  }, [active, data, loading]);
+  }, [active, data, loading, attempted]);
 
   const selectedPlacement = useMemo(() => data?.baseline?.placements?.find(p => p.key === selected) || null, [data, selected]);
 
@@ -64,7 +66,7 @@ export default function ProfileAstrologyGuide() {
       <div className="glass rounded-3xl p-5 sm:p-6">
         <div className="mb-4 flex items-center gap-2 text-gold"><Sparkles className="h-5 w-5" /><h3 className="font-serif text-xl text-white">Daily Alignment</h3></div>
         {loading && <div className="flex items-center gap-2 py-5 text-sm text-white/40"><Loader2 className="h-4 w-4 animate-spin" /> Reading today's sky…</div>}
-        {error && <p className="text-sm text-red-200/80">{error}</p>}
+        {error && <div className="space-y-3"><p className="text-sm text-red-200/80">{error}</p><button onClick={() => { setAttempted(false); setError(''); }} className="rounded-xl border border-white/10 px-3 py-2 text-xs text-white/50">Try again</button></div>}
         {data?.daily && <div className="space-y-4">
           <div><div className="font-serif text-2xl text-white">{data.daily.headline}</div><div className="mt-1 text-xs uppercase tracking-widest text-white/30">Day {data.daily.day_number ?? '—'} · {data.daily.moon_phase || 'Current lunar cycle'}</div></div>
           <p className="text-sm leading-7 text-white/65">{data.daily.horoscope}</p>
