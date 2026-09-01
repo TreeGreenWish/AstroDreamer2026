@@ -2,6 +2,7 @@ import { dataStore } from "../src/server/dataStore.js";
 import { acceptBetaInvite, createBetaInvite, createRecoveryCode, getBetaAccess, isBetaOwner, listBetaInvites, redeemRecoveryCode, redeemSetupCode, resendBetaInvite, revokeBetaInvite, saveBetaFeedback } from "../src/server/betaAccess.js";
 import { deleteUserAccount } from "../src/server/accountDeletion.js";
 import { getAiUsageSummary } from "../src/server/aiUsageSummary.js";
+import { listOwnerFeedback } from "../src/server/feedbackInbox.js";
 import { claimLegacyArchive, legacyArchiveAvailable } from "../src/server/legacyArchive.js";
 import { requireIdentityUser, requirePrivateBetaUser } from "../src/server/requestAuth.js";
 import type { UserProfile } from "../src/types.js";
@@ -44,6 +45,12 @@ export default async function handler(req: any, res: any) {
       const user = await requirePrivateBetaUser(req);
       await saveBetaFeedback(user.id, String(req.body?.category || "general"), String(req.body?.message || ""), String(req.body?.page || ""));
       return res.status(201).json({ success: true });
+    }
+
+    if (authAction === "feedback-inbox") {
+      if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+      const user = await requirePrivateBetaUser(req);
+      return res.status(200).json(await listOwnerFeedback(user.id));
     }
 
     if (authAction === "invite") {
