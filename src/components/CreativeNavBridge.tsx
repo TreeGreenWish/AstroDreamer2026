@@ -9,15 +9,21 @@ export default function CreativeNavBridge() {
   useEffect(() => {
     const locate = () => {
       const candidates = Array.from(document.querySelectorAll('nav')) as HTMLElement[];
-      setNav(candidates.find(node => node.textContent?.includes('Journal')) || null);
+      const primary = candidates.find(node =>
+        node.querySelectorAll('button').length >= 5 &&
+        (String(node.className).includes('fixed') || node.getBoundingClientRect().top > window.innerHeight / 2)
+      );
+      setNav(primary || null);
     };
     locate();
     const observer = new MutationObserver(locate);
     observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', locate);
     const stateHandler = (event: Event) => setActive(Boolean((event as CustomEvent)?.detail?.open));
     window.addEventListener('astradream:creative-open-state', stateHandler);
     return () => {
       observer.disconnect();
+      window.removeEventListener('resize', locate);
       window.removeEventListener('astradream:creative-open-state', stateHandler);
     };
   }, []);
