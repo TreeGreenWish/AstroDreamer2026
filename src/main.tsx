@@ -9,11 +9,15 @@ import UnknownDreamTimeSupport from './components/UnknownDreamTimeSupport';
 import { ProfileAccountControls } from './components/ProfileAccountControls';
 import CreativeJournalPortal from './components/CreativeJournalPortal';
 import CreativeNavBridge from './components/CreativeNavBridge';
+import ProfileAstrologyGuide from './components/ProfileAstrologyGuide';
+import OwnerFeedbackNotifier from './components/OwnerFeedbackNotifier';
+import BrandNameNormalizer from './components/BrandNameNormalizer';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthGate>
+      <BrandNameNormalizer />
       <App />
       <UnknownDreamTimeSupport />
       <ProfileAccountControls />
@@ -21,6 +25,8 @@ createRoot(document.getElementById('root')!).render(
       <ExportJournalButton />
       <CreativeJournalPortal />
       <CreativeNavBridge />
+      <ProfileAstrologyGuide />
+      <OwnerFeedbackNotifier />
     </AuthGate>
   </StrictMode>,
 );
