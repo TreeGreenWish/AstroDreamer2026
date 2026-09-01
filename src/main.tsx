@@ -16,8 +16,8 @@ import './index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <BrandNameNormalizer />
     <AuthGate>
-      <BrandNameNormalizer />
       <App />
       <UnknownDreamTimeSupport />
       <ProfileAccountControls />
