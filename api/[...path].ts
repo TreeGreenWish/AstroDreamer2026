@@ -7,6 +7,7 @@ import { claimLegacyArchive, legacyArchiveAvailable } from "../src/server/legacy
 import { requireAuthenticatedUser } from "../src/server/requestAuth.js";
 import { createCreativeEntry, deleteCreativeEntry, listCreativeEntries, listCreativeVersions, updateCreativeEntry } from "../src/server/creativeStore.js";
 import { getProfileAstrology } from "../src/server/profileAstrology.js";
+import { buildTemporalResonance } from "../src/server/temporalResonance.js";
 import type { Dream, UserProfile } from "../src/types.js";
 
 export const config = { maxDuration: 300 };
@@ -71,6 +72,15 @@ export default async function handler(req: any, res: any) {
       const date = String(req.query?.date || new Date().toISOString().slice(0, 10));
       const timezone = String(req.query?.timezone || "UTC");
       return res.status(200).json(await getProfileAstrology(user.id, profile, date, timezone));
+    }
+
+    if (parts[0] === "temporal-resonance" && parts.length === 1) {
+      if (method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+      const date = String(req.query?.date || new Date().toISOString().slice(0, 10));
+      const time = String(req.query?.time || "12:00");
+      const timezone = String(req.query?.timezone || "UTC");
+      const dreams = await dataStore.getDreams(user.id);
+      return res.status(200).json(await buildTemporalResonance(user.id, dreams, date, time, timezone));
     }
 
     if (parts[0] === "creative") {
