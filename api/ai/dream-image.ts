@@ -1,4 +1,4 @@
-import { generateDreamImage } from "../../src/server/geminiService.js";
+import { generateDreamRecallImage } from "../../src/server/dreamImageV2.js";
 import { getCached, setCached } from "../../src/server/aiCache.js";
 import { meterEstimatedCall } from "../../src/server/aiUsage.js";
 import { requireAuthenticatedUser } from "../../src/server/requestAuth.js";
@@ -19,10 +19,10 @@ export default async function handler(req: any, res: any) {
       userId: user.id,
       operation: "dream_image",
       model: IMAGE_MODEL,
-      input: { title: dream.title, content: dream.content },
-      execute: () => generateDreamImage(dream),
+      input: { title: dream.title, content: dream.content, image_prompt_version: 2 },
+      execute: () => generateDreamRecallImage(dream),
       imageCount: value => value ? 1 : 0,
-      metadata: { resolution: "1K", aspect_ratio: "16:9" },
+      metadata: { resolution: "1K", aspect_ratio: "16:9", composition: "single-scene-recall-anchor-v2" },
     });
     return res.status(200).json(result);
   } catch (error: any) {
