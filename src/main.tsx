@@ -11,6 +11,7 @@ import CreativeNavBridge from './components/CreativeNavBridge';
 import ProfileAstrologyGuide from './components/ProfileAstrologyGuide';
 import OwnerFeedbackNotifier from './components/OwnerFeedbackNotifier';
 import BrandNameNormalizer from './components/BrandNameNormalizer';
+import TemporalResonanceFeed from './components/TemporalResonanceFeed';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root')!).render(
       <CreativeNavBridge />
       <ProfileAstrologyGuide />
       <OwnerFeedbackNotifier />
+      <TemporalResonanceFeed />
     </AuthGate>
   </StrictMode>,
 );
