@@ -3,7 +3,6 @@ import {createRoot} from 'react-dom/client';
 import './lib/localDateOnly';
 import App from './App.tsx';
 import DreamAiRetryControls from './components/DreamAiRetryControls';
-import { ExportJournalButton } from './components/ExportJournalButton';
 import { AuthGate } from './components/AuthGateV2';
 import UnknownDreamTimeSupport from './components/UnknownDreamTimeSupport';
 import { ProfileAccountControls } from './components/ProfileAccountControls';
@@ -22,7 +21,6 @@ createRoot(document.getElementById('root')!).render(
       <UnknownDreamTimeSupport />
       <ProfileAccountControls />
       <DreamAiRetryControls />
-      <ExportJournalButton />
       <CreativeJournalPortal />
       <CreativeNavBridge />
       <ProfileAstrologyGuide />
