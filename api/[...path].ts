@@ -6,6 +6,7 @@ import {
 import { claimLegacyArchive, legacyArchiveAvailable } from "../src/server/legacyArchive.js";
 import { requireAuthenticatedUser } from "../src/server/requestAuth.js";
 import { createCreativeEntry, deleteCreativeEntry, listCreativeEntries, listCreativeVersions, updateCreativeEntry } from "../src/server/creativeStore.js";
+import { getProfileAstrology } from "../src/server/profileAstrology.js";
 import type { Dream, UserProfile } from "../src/types.js";
 
 export const config = { maxDuration: 300 };
@@ -61,6 +62,15 @@ export default async function handler(req: any, res: any) {
         return res.status(200).json({ success: true });
       }
       return res.status(405).json({ error: "Method not allowed" });
+    }
+
+    if (parts[0] === "profile-astrology" && parts.length === 1) {
+      if (method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+      const profile = await dataStore.getProfile(user.id);
+      if (!profile) return res.status(404).json({ error: "Profile not found" });
+      const date = String(req.query?.date || new Date().toISOString().slice(0, 10));
+      const timezone = String(req.query?.timezone || "UTC");
+      return res.status(200).json(await getProfileAstrology(user.id, profile, date, timezone));
     }
 
     if (parts[0] === "creative") {
