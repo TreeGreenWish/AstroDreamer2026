@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "test:historical-context": "node --import tsx scripts/verifyHistoricalContext.ts",
     "migrate:sqlite:check": "tsx scripts/migrateSqliteToSupabase.ts",
     "migrate:sqlite": "tsx scripts/migrateSqliteToSupabase.ts --execute"
   },

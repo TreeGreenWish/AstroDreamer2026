@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import type { Dream, DreamAnalysisV1, DreamAstrologyV1, DreamFeaturesV1, UserProfile } from "../types.js";
+import type { Dream, DreamAnalysisV1, DreamAstrologyV1, DreamFeaturesV1, HistoricalDreamContext, InterpretationProvenanceClaim, UserProfile } from "../types.js";
 
 function getAi() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -17,6 +17,7 @@ export type DreamInterpretationV2 = {
   interpretation: string;
   analysis_json: DreamAnalysisV1;
   feature_json: DreamFeaturesV1;
+  provenance_json: InterpretationProvenanceClaim[];
   planetary_influences: Record<string, string>;
   tags: string[];
 };
@@ -24,7 +25,8 @@ export type DreamInterpretationV2 = {
 export async function interpretDreamV2(
   dream: Dream,
   userProfile: UserProfile,
-  astrology: DreamAstrologyV1 & { instant_utc?: string; day_number?: number; phase_angle?: number }
+  astrology: DreamAstrologyV1 & { instant_utc?: string; day_number?: number; phase_angle?: number },
+  historicalContext: HistoricalDreamContext
 ): Promise<DreamInterpretationV2> {
   const response = await getAi().models.generateContent({
     model: "gemini-3-flash-preview",
@@ -60,6 +62,9 @@ ${JSON.stringify({
   },
 })}
 
+Retrieved personal-history evidence:
+${JSON.stringify(historicalContext)}
+
 Deterministic dream-moment astrology supplied by AstraDream's ephemeris engine:
 ${JSON.stringify(astrology)}
 
@@ -75,6 +80,9 @@ Dream interpretation rules:
 - Distinguish observation from inference. Do not diagnose the user or claim hidden facts.
 - Symbols are contextual: provide multiple plausible meanings when warranted rather than a single universal definition.
 - Treat explicit personal_context facts and the user's notes as privileged waking-life context. Never contradict an explicit relationship fact with a symbolic guess.
+- Use personal-history comparisons only when supported by retrieved personal-history evidence above.
+- Never invent a frequency, first/last occurrence, change, absence, or sequence. Quote counts only from signal_counts and cite the supporting dream IDs in provenance_json.
+- If the retrieved evidence is thin or ambiguous, say so instead of forcing a longitudinal claim.
 - Do not expand personal context into unstated sensitive facts or assumptions.
 - Identify emotional movement, characters/relationships, settings, transformations, conflicts/tensions, unusual objects/actions, and the dream's central psychological or narrative movement.
 - Reflection questions must be specific to this dream and genuinely useful for journaling.
@@ -84,6 +92,9 @@ Dream interpretation rules:
 - Extract normalized features for longitudinal analytics. Use short canonical labels and avoid duplicates/synonyms within the same list.
 - Tags should be useful search/index terms, not generic filler.
 - For planetary_influences, interpret each supplied planet's exact dream-moment placement in 1-2 careful sentences. Mention retrograde only when the supplied fact says retrograde.
+- Return 4-10 concise provenance claims covering the interpretation's most important assertions. Mark each as dream_text, personal_history, user_context, jungian, psychoanalytic, mythological, historical_symbolism, astrology, or ai_hypothesis.
+- source_dream_ids must contain only IDs supplied in retrieved personal-history evidence; otherwise return an empty array.
+- Interpretive traditions are lenses, not facts. AI hypotheses should use low or medium confidence, never high.
 
 Return JSON only.`,
     config: {
@@ -137,6 +148,17 @@ Return JSON only.`,
             },
             required: ["version", "themes", "symbols", "characters", "locations", "emotions", "transformations", "objects", "actions"],
           },
+          provenance_json: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                claim: { type: Type.STRING }, source_type: { type: Type.STRING }, source_dream_ids: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                confidence: { type: Type.STRING }, caveat: { type: Type.STRING },
+              },
+              required: ["claim", "source_type", "source_dream_ids", "confidence"],
+            },
+          },
           planetary_influences: {
             type: Type.OBJECT,
             properties: {
@@ -147,7 +169,7 @@ Return JSON only.`,
           },
           tags: stringArray,
         },
-        required: ["interpretation", "analysis_json", "feature_json", "planetary_influences", "tags"],
+        required: ["interpretation", "analysis_json", "feature_json", "provenance_json", "planetary_influences", "tags"],
       },
     },
   });

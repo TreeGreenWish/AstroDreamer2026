@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { dataStore } from "../../src/server/dataStore.js";
 import { deterministicDreamAstrology } from "../../src/server/deterministicAstrology.js";
 import { interpretDreamV2 } from "../../src/server/dreamInterpreterV2.js";
+import { buildHistoricalDreamContext } from "../../src/server/historicalDreamContext.js";
 import { revisitDreamWithContext } from "../../src/server/dreamRevisit.js";
 import { logAiCacheHit, meterEstimatedCall } from "../../src/server/aiUsage.js";
 import { requireAuthenticatedUser } from "../../src/server/requestAuth.js";
@@ -29,6 +30,7 @@ function signsFromAstrology(astrology: ReturnType<typeof deterministicDreamAstro
 function existingAnalysis(dream: Dream) {
   return {
     interpretation: dream.interpretation, analysis_json: dream.analysis_json, feature_json: dream.feature_json,
+    provenance_json: dream.provenance_json || [], provenance_version: dream.provenance_version,
     analysis_version: dream.analysis_version, feature_version: dream.feature_version,
     astrology_json: dream.astrology_json, astrology_version: dream.astrology_version,
     sun_sign: dream.sun_sign, moon_sign: dream.moon_sign, mercury_sign: dream.mercury_sign,
@@ -107,8 +109,9 @@ export default async function handler(req: any, res: any) {
     }
 
     const expectedSource = timeKnown ? EXACT_EPHEMERIS_SOURCE : DATE_ONLY_EPHEMERIS_SOURCE;
-    const alreadyEphemerisAware = existing?.interpretation && (existing.analysis_version || 0) >= 2 && existing.astrology_json?.source === expectedSource;
-    if (alreadyEphemerisAware) {
+    const alreadyDreamPartnerV3 = existing?.interpretation && (existing.analysis_version || 0) >= 3
+      && (existing.provenance_version || 0) >= 1 && existing.astrology_json?.source === expectedSource;
+    if (alreadyDreamPartnerV3) {
       await logAiCacheHit(user.id, "dream_interpretation", TEXT_MODEL, { dream_id: persisted.id, reuse: "persisted_analysis" });
       return res.status(200).json(existingAnalysis({ ...existing, ...factualUpdate }));
     }
@@ -116,15 +119,17 @@ export default async function handler(req: any, res: any) {
     await dataStore.updateDream(persisted.id, { ...factualUpdate, enrichment_status: "interpreting", interpretation_error: null }, user.id);
     try {
       const currentProfile = (await dataStore.getProfile(user.id)) || userProfile as UserProfile;
+      const historicalContext = buildHistoricalDreamContext(dreamWithTimezone, await dataStore.getDreams(user.id));
       const analysis = await meterEstimatedCall({
         userId: user.id, operation: "dream_interpretation", model: TEXT_MODEL,
-        input: { dream: dreamWithTimezone, userProfile: currentProfile, astrology },
-        execute: () => interpretDreamV2(dreamWithTimezone, currentProfile, astrology),
-        metadata: { dream_id: persisted.id, analysis_version: 2, time_precision: astrology.time_precision },
+        input: { dream: dreamWithTimezone, userProfile: currentProfile, astrology, historicalContext },
+        execute: () => interpretDreamV2(dreamWithTimezone, currentProfile, astrology, historicalContext),
+        metadata: { dream_id: persisted.id, analysis_version: 3, time_precision: astrology.time_precision, historical_matches: historicalContext.matched_dreams.length },
       });
       const enrichedDream: Dream = {
         ...factualUpdate, interpretation: analysis.interpretation, analysis_json: analysis.analysis_json,
-        analysis_version: 2, feature_json: analysis.feature_json, feature_version: 1,
+        analysis_version: 3, feature_json: analysis.feature_json, feature_version: 1,
+        provenance_json: analysis.provenance_json, provenance_version: 1,
         planetary_influences: analysis.planetary_influences as Dream["planetary_influences"], tags: analysis.tags,
         enrichment_status: "interpreted", interpreted_at: new Date().toISOString(), interpretation_error: null, id: persisted.id,
       };
@@ -132,7 +137,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({
         ...analysis, ...reliableSigns, moon_phase: astrology.moon_phase, moon_illumination: astrology.moon_illumination,
         day_number: astrology.day_number, instant_utc: astrology.instant_utc, astrology_json: astrology,
-        astrology_version: 2, analysis_version: 2, feature_version: 1, persisted_dream_id: persisted.id, pending: false,
+        astrology_version: 2, analysis_version: 3, feature_version: 1, provenance_version: 1, persisted_dream_id: persisted.id, pending: false,
       });
     } catch (error: any) {
       const message = error instanceof Error ? error.message : "Dream interpretation failed";

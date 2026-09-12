@@ -106,6 +106,40 @@ export interface DreamFeaturesV1 {
   actions: string[];
 }
 
+export type InterpretationSourceType =
+  | 'dream_text'
+  | 'personal_history'
+  | 'user_context'
+  | 'jungian'
+  | 'psychoanalytic'
+  | 'mythological'
+  | 'historical_symbolism'
+  | 'astrology'
+  | 'ai_hypothesis';
+
+export interface InterpretationProvenanceClaim {
+  claim: string;
+  source_type: InterpretationSourceType;
+  source_dream_ids: number[];
+  confidence: 'low' | 'medium' | 'high';
+  caveat?: string;
+}
+
+export interface HistoricalDreamEvidence {
+  dream_id: number;
+  title: string;
+  date: string;
+  summary: string;
+  shared_signals: string[];
+  relevance_score: number;
+}
+
+export interface HistoricalDreamContext {
+  corpus_size: number;
+  matched_dreams: HistoricalDreamEvidence[];
+  signal_counts: Array<{ signal: string; dream_count: number; dream_ids: number[] }>;
+}
+
 export interface AstrologyBodyFact {
   longitude: number;
   sign: string;
@@ -180,6 +214,8 @@ export interface Dream {
   astrology_version?: number | null;
   feature_json?: DreamFeaturesV1 | null;
   feature_version?: number | null;
+  provenance_json?: InterpretationProvenanceClaim[];
+  provenance_version?: number | null;
   context_facts?: PersonalContextFact[];
   revisits?: DreamRevisit[];
   enrichment_status?: DreamEnrichmentStatus;
