@@ -57,6 +57,21 @@ async function startServer() {
     }
   });
 
+  app.get("/api/entities", async (_req, res) => {
+    try { res.json(await dataStore.getEntitySummaries()); }
+    catch (error) { console.error("Failed to fetch entities:", error); res.status(500).json({ error: "Failed to fetch entities" }); }
+  });
+
+  app.post("/api/entities", async (req, res) => {
+    if (req.body?.action !== "backfill") return res.status(405).json({ error: "Method not allowed" });
+    try {
+      const dreams = (await dataStore.getDreams()).filter(dream => dream.id && dream.feature_json);
+      let mentionCount = 0;
+      for (const dream of dreams) mentionCount += await dataStore.syncDreamEntities(dream);
+      res.json({ dreams_processed: dreams.length, mentions_synced: mentionCount });
+    } catch (error) { console.error("Failed to backfill entities:", error); res.status(500).json({ error: "Failed to backfill entities" }); }
+  });
+
   app.post("/api/dreams", async (req, res) => {
     try {
       const dream = await dataStore.createDream(req.body as Dream);

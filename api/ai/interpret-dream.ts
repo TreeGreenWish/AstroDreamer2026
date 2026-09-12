@@ -134,6 +134,7 @@ export default async function handler(req: any, res: any) {
         enrichment_status: "interpreted", interpreted_at: new Date().toISOString(), interpretation_error: null, id: persisted.id,
       };
       await dataStore.updateDream(persisted.id, enrichedDream, user.id);
+      await dataStore.syncDreamEntities(enrichedDream, user.id);
       return res.status(200).json({
         ...analysis, ...reliableSigns, moon_phase: astrology.moon_phase, moon_illumination: astrology.moon_illumination,
         day_number: astrology.day_number, instant_utc: astrology.instant_utc, astrology_json: astrology,

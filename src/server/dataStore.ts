@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 
-import type { Dream, UserProfile } from "../types";
+import { extractDreamEntityCandidates } from "./dreamEntities.js";
+import type { Dream, DreamEntitySummary, DreamEntityType, UserProfile } from "../types";
 
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "");
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -133,6 +134,7 @@ class SqliteStore {
   constructor() { this.db = new Database("astradream.db"); this.initialize(); }
 
   private initialize() {
+    this.db.pragma("foreign_keys = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS user_profile (
         id INTEGER PRIMARY KEY CHECK (id = 1), name TEXT, dob TEXT, tob TEXT,
@@ -151,6 +153,31 @@ class SqliteStore {
         moon_phase TEXT, day_number INTEGER, planetary_influences TEXT, tags TEXT,
         notes TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE TABLE IF NOT EXISTS dream_entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL,
+        canonical_name TEXT NOT NULL,
+        normalized_name TEXT NOT NULL,
+        aliases TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'active',
+        merged_into_entity_id INTEGER REFERENCES dream_entities(id),
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(entity_type, normalized_name)
+      );
+      CREATE TABLE IF NOT EXISTS dream_entity_mentions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dream_id INTEGER NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
+        entity_id INTEGER NOT NULL REFERENCES dream_entities(id) ON DELETE CASCADE,
+        surface_form TEXT NOT NULL,
+        context TEXT,
+        confidence TEXT NOT NULL DEFAULT 'medium',
+        source_version INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(dream_id, entity_id)
+      );
+      CREATE INDEX IF NOT EXISTS dream_entity_mentions_entity_idx ON dream_entity_mentions(entity_id);
+      CREATE INDEX IF NOT EXISTS dream_entity_mentions_dream_idx ON dream_entity_mentions(dream_id);
     `);
     const dreamsColumnNames = (this.db.prepare("PRAGMA table_info(dreams)").all() as any[]).map(c => c.name);
     ["sun_sign","moon_sign","mercury_sign","venus_sign","mars_sign","jupiter_sign","saturn_sign","uranus_sign","neptune_sign","pluto_sign","moon_phase","day_number","planetary_influences","tags","notes"].forEach(column => {
@@ -188,6 +215,41 @@ class SqliteStore {
   async updateDream(id: number, dream: Dream, _userId?: string): Promise<Dream> {
     this.db.prepare(`UPDATE dreams SET title=?,content=?,date=?,time=?,location_lat=?,location_lng=?,location_name=?,interpretation=?,image_url=?,sun_sign=?,moon_sign=?,mercury_sign=?,venus_sign=?,mars_sign=?,jupiter_sign=?,saturn_sign=?,uranus_sign=?,neptune_sign=?,pluto_sign=?,moon_phase=?,day_number=?,planetary_influences=?,tags=?,notes=? WHERE id=?`).run(dream.title,dream.content,dream.date,dream.time,dream.location_lat,dream.location_lng,dream.location_name,dream.interpretation,dream.image_url,dream.sun_sign,dream.moon_sign,dream.mercury_sign,dream.venus_sign,dream.mars_sign,dream.jupiter_sign,dream.saturn_sign,dream.uranus_sign,dream.neptune_sign,dream.pluto_sign,dream.moon_phase,dream.day_number,JSON.stringify(dream.planetary_influences ?? null),JSON.stringify(dream.tags ?? []),JSON.stringify(dream.notes ?? []),id);
     return { ...dream, id };
+  }
+
+  async syncDreamEntities(dream: Dream, _userId?: string): Promise<number> {
+    if (!dream.id) throw new Error("A saved dream id is required before syncing entities");
+    const candidates = extractDreamEntityCandidates(dream);
+    const sync = this.db.transaction(() => {
+      const upsert = this.db.prepare(`INSERT INTO dream_entities (entity_type,canonical_name,normalized_name)
+        VALUES (?,?,?) ON CONFLICT(entity_type,normalized_name) DO UPDATE SET updated_at=CURRENT_TIMESTAMP`);
+      const find = this.db.prepare("SELECT id FROM dream_entities WHERE entity_type=? AND normalized_name=?");
+      const insertMention = this.db.prepare(`INSERT INTO dream_entity_mentions
+        (dream_id,entity_id,surface_form,context,confidence,source_version) VALUES (?,?,?,?,?,1)`);
+      const resolved = candidates.map(candidate => {
+        upsert.run(candidate.entity_type, candidate.canonical_name, candidate.normalized_name);
+        const entity = find.get(candidate.entity_type, candidate.normalized_name) as { id: number };
+        return { candidate, entityId: entity.id };
+      });
+      this.db.prepare("DELETE FROM dream_entity_mentions WHERE dream_id=?").run(dream.id);
+      for (const { candidate, entityId } of resolved) {
+        insertMention.run(dream.id, entityId, candidate.surface_form, candidate.context || null, candidate.confidence);
+      }
+      return resolved.length;
+    });
+    return sync();
+  }
+
+  async getEntitySummaries(_userId?: string): Promise<DreamEntitySummary[]> {
+    const rows = this.db.prepare(`SELECT e.*, COUNT(m.id) AS mention_count,
+      GROUP_CONCAT(m.dream_id) AS dream_ids, MIN(d.date) AS first_seen, MAX(d.date) AS last_seen
+      FROM dream_entities e LEFT JOIN dream_entity_mentions m ON m.entity_id=e.id
+      LEFT JOIN dreams d ON d.id=m.dream_id GROUP BY e.id
+      ORDER BY mention_count DESC, e.canonical_name ASC`).all() as any[];
+    return rows.map(row => ({
+      ...row, aliases: JSON.parse(row.aliases || "[]"), mention_count: Number(row.mention_count || 0),
+      dream_ids: row.dream_ids ? String(row.dream_ids).split(",").map(Number) : [],
+    }));
   }
 
   async deleteDream(id: number, _userId?: string) { this.db.prepare("DELETE FROM dreams WHERE id = ?").run(id); }
@@ -245,6 +307,62 @@ class SupabaseStore {
     });
     if (!rows[0]) throw new Error("Dream not found or not owned by this account");
     return materializeDreamImage(rows[0]);
+  }
+
+  async syncDreamEntities(dream: Dream, userId?: string): Promise<number> {
+    if (!dream.id) throw new Error("A saved dream id is required before syncing entities");
+    if (!userId) return 0;
+    const candidates = extractDreamEntityCandidates(dream);
+    const existing = await supabaseRequest<any[]>(`dream_entities?user_id=eq.${encodeURIComponent(userId)}&select=*`);
+    const existingKeys = new Set(existing.map(entity => `${entity.entity_type}:${entity.normalized_name}`));
+    const missing = candidates.filter(candidate => !existingKeys.has(`${candidate.entity_type}:${candidate.normalized_name}`));
+    if (missing.length) await supabaseRequest("dream_entities?on_conflict=user_id%2Centity_type%2Cnormalized_name", {
+      method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify(missing.map(candidate => ({
+        user_id: userId, entity_type: candidate.entity_type, canonical_name: candidate.canonical_name,
+        normalized_name: candidate.normalized_name, aliases: [], status: "active",
+      }))),
+    });
+    const entities = missing.length
+      ? await supabaseRequest<any[]>(`dream_entities?user_id=eq.${encodeURIComponent(userId)}&select=*`)
+      : existing;
+    const byKey = new Map(entities.map(entity => [`${entity.entity_type}:${entity.normalized_name}`, entity]));
+    const mentions = candidates.map(candidate => {
+      const entity = byKey.get(`${candidate.entity_type}:${candidate.normalized_name}`);
+      if (!entity?.id) throw new Error(`Entity was not persisted: ${candidate.entity_type}/${candidate.canonical_name}`);
+      return {
+        user_id: userId, dream_id: dream.id, entity_id: entity.id, surface_form: candidate.surface_form,
+        context: candidate.context || null, confidence: candidate.confidence, source_version: 1,
+      };
+    });
+    await supabaseRequest(`dream_entity_mentions?dream_id=eq.${dream.id}&user_id=eq.${encodeURIComponent(userId)}`, {
+      method: "DELETE", headers: { Prefer: "return=minimal" },
+    });
+    if (mentions.length) await supabaseRequest("dream_entity_mentions", {
+      method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(mentions),
+    });
+    return mentions.length;
+  }
+
+  async getEntitySummaries(userId?: string): Promise<DreamEntitySummary[]> {
+    if (!userId) return [];
+    const owner = encodeURIComponent(userId);
+    const [entities, mentions, dreams] = await Promise.all([
+      supabaseRequest<any[]>(`dream_entities?user_id=eq.${owner}&select=*&order=canonical_name.asc`),
+      supabaseRequest<any[]>(`dream_entity_mentions?user_id=eq.${owner}&select=entity_id,dream_id`),
+      supabaseRequest<Array<{id:number;date:string}>>(`dreams?user_id=eq.${owner}&select=id,date`),
+    ]);
+    const dateByDream = new Map(dreams.map(dream => [dream.id, dream.date]));
+    return entities.map(entity => {
+      const entityMentions = mentions.filter(mention => mention.entity_id === entity.id);
+      const dates = entityMentions.map(mention => dateByDream.get(mention.dream_id)).filter(Boolean).sort() as string[];
+      return {
+        id: entity.id, entity_type: entity.entity_type as DreamEntityType, canonical_name: entity.canonical_name,
+        normalized_name: entity.normalized_name, aliases: entity.aliases || [], status: entity.status,
+        merged_into_entity_id: entity.merged_into_entity_id, mention_count: entityMentions.length,
+        dream_ids: entityMentions.map(mention => mention.dream_id), first_seen: dates[0], last_seen: dates[dates.length - 1],
+      };
+    }).sort((a, b) => b.mention_count - a.mention_count || a.canonical_name.localeCompare(b.canonical_name));
   }
 
   async deleteDream(id: number, userId?: string) {

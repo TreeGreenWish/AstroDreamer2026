@@ -106,6 +106,39 @@ export interface DreamFeaturesV1 {
   actions: string[];
 }
 
+export type DreamEntityType =
+  | 'theme'
+  | 'symbol'
+  | 'character'
+  | 'place'
+  | 'emotion'
+  | 'transformation'
+  | 'object'
+  | 'action';
+
+export interface DreamEntityCandidate {
+  entity_type: DreamEntityType;
+  canonical_name: string;
+  normalized_name: string;
+  surface_form: string;
+  context?: string;
+  confidence: 'low' | 'medium' | 'high';
+}
+
+export interface DreamEntitySummary {
+  id: number;
+  entity_type: DreamEntityType;
+  canonical_name: string;
+  normalized_name: string;
+  aliases: string[];
+  status: 'active' | 'merged';
+  merged_into_entity_id?: number | null;
+  mention_count: number;
+  dream_ids: number[];
+  first_seen?: string;
+  last_seen?: string;
+}
+
 export type InterpretationSourceType =
   | 'dream_text'
   | 'personal_history'

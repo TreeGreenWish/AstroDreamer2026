@@ -83,6 +83,17 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json(await buildTemporalResonance(user.id, dreams, date, time, timezone));
     }
 
+    if (parts[0] === "entities" && parts.length === 1) {
+      if (method === "GET") return res.status(200).json(await dataStore.getEntitySummaries(user.id));
+      if (method === "POST" && body.action === "backfill") {
+        const dreams = (await dataStore.getDreams(user.id)).filter(dream => dream.id && dream.feature_json);
+        let mentionCount = 0;
+        for (const dream of dreams) mentionCount += await dataStore.syncDreamEntities(dream, user.id);
+        return res.status(200).json({ dreams_processed: dreams.length, mentions_synced: mentionCount });
+      }
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
     if (parts[0] === "creative") {
       if (parts.length === 1) {
         if (method === "GET") return res.status(200).json(await listCreativeEntries(user.id));
