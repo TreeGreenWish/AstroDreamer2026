@@ -4,6 +4,11 @@ export function normalizeEntityName(value: string) {
   return value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function normalizeConfidence(value: unknown): DreamEntityCandidate["confidence"] {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "low" || normalized === "high" ? normalized : "medium";
+}
+
 function addCandidates(
   target: DreamEntityCandidate[],
   entityType: DreamEntityType,
@@ -21,7 +26,7 @@ function addCandidates(
       normalized_name: normalizedName,
       surface_form: canonicalName,
       context: detail.context,
-      confidence: detail.confidence || "medium",
+      confidence: normalizeConfidence(detail.confidence),
     });
   }
 }

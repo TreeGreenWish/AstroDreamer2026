@@ -59,6 +59,16 @@ function mergeExplicitContext(existing: PersonalContextFact[], incoming: Persona
   return [...merged.values()];
 }
 
+async function syncEntitiesWithoutBlocking(dream: Dream, userId: string) {
+  try {
+    await dataStore.syncDreamEntities(dream, userId);
+  } catch (entitySyncError) {
+    // Entity indexing is derived data. Never report the primary dream save or
+    // interpretation as failed when this secondary step can be retried/backfilled.
+    console.error("Dream saved, but persistent entity sync failed", entitySyncError);
+  }
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   try {
@@ -113,6 +123,7 @@ export default async function handler(req: any, res: any) {
       && (existing.provenance_version || 0) >= 1 && existing.astrology_json?.source === expectedSource;
     if (alreadyDreamPartnerV3) {
       await logAiCacheHit(user.id, "dream_interpretation", TEXT_MODEL, { dream_id: persisted.id, reuse: "persisted_analysis" });
+      await syncEntitiesWithoutBlocking({ ...existing, ...factualUpdate }, user.id);
       return res.status(200).json(existingAnalysis({ ...existing, ...factualUpdate }));
     }
 
@@ -134,7 +145,7 @@ export default async function handler(req: any, res: any) {
         enrichment_status: "interpreted", interpreted_at: new Date().toISOString(), interpretation_error: null, id: persisted.id,
       };
       await dataStore.updateDream(persisted.id, enrichedDream, user.id);
-      await dataStore.syncDreamEntities(enrichedDream, user.id);
+      await syncEntitiesWithoutBlocking(enrichedDream, user.id);
       return res.status(200).json({
         ...analysis, ...reliableSigns, moon_phase: astrology.moon_phase, moon_illumination: astrology.moon_illumination,
         day_number: astrology.day_number, instant_utc: astrology.instant_utc, astrology_json: astrology,
