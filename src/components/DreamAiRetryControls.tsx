@@ -6,7 +6,6 @@ import { generateDreamImage, interpretDream, revisitDream } from '../services/ge
 
 type ActionState = 'idle' | 'working' | 'pending' | 'success' | 'quota' | 'error';
 
-function normalizeTime(value?: string) { return (value || '').slice(0, 5); }
 function isQuotaMessage(message: string) { return /quota|resource_exhausted|rate.?limit|prepayment credits|429/i.test(message); }
 function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -27,14 +26,12 @@ export default function DreamAiRetryControls() {
 
   useEffect(() => {
     let cancelled = false;
-    const sync = async () => {
-      const title = document.querySelector('h2.text-5xl.font-serif.text-white') as HTMLElement | null;
-      const nextMount = title?.parentElement || null;
-      if (!nextMount) {
-        if (!cancelled) { setMountNode(null); setDream(null); }
-        return;
-      }
-      if (!cancelled) setMountNode(nextMount);
+    let activeDetail: HTMLElement | null = null;
+    let activeDreamId: number | null = null;
+    let requestVersion = 0;
+
+    const loadControls = async (nextMount: HTMLElement, dreamId: number, version: number) => {
+      setMountNode(nextMount);
       try {
         const [dreamsRes, profileRes] = await Promise.all([
           fetch('/api/dreams', { cache: 'no-store' }),
@@ -42,24 +39,38 @@ export default function DreamAiRetryControls() {
         ]);
         const dreams = await readJson(dreamsRes) as Dream[];
         const profileData = await readJson(profileRes) as UserProfile;
-        const titleText = title?.textContent?.trim();
-        const matches = dreams.filter(d => d.title === titleText);
-        let selected = matches[0] || null;
-        if (matches.length > 1) {
-          const detailText = nextMount.textContent || '';
-          selected = matches.find(d => detailText.includes(normalizeTime(d.time))) || matches[0];
-        }
-        if (!cancelled) { setDream(selected); setProfile(profileData); }
+        const selected = dreams.find(d => d.id === dreamId) || null;
+        if (!cancelled && version === requestVersion) { setDream(selected); setProfile(profileData); }
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && version === requestVersion) {
           setMessage(error instanceof Error ? error.message : 'Could not load AI controls');
           setDream(null);
         }
       }
     };
-    const observer = new MutationObserver(() => void sync());
+
+    const locate = () => {
+      const detail = document.querySelector('[data-dream-detail-id]') as HTMLElement | null;
+      const nextMount = detail || null;
+      const dreamId = Number(detail?.dataset.dreamDetailId);
+      if (!nextMount) {
+        if (activeDetail && !cancelled) { setMountNode(null); setDream(null); }
+        activeDetail = null;
+        activeDreamId = null;
+        requestVersion += 1;
+        return;
+      }
+      if (!Number.isFinite(dreamId) || (nextMount === activeDetail && dreamId === activeDreamId)) return;
+
+      activeDetail = nextMount;
+      activeDreamId = dreamId;
+      requestVersion += 1;
+      void loadControls(nextMount, dreamId, requestVersion);
+    };
+
+    const observer = new MutationObserver(locate);
     observer.observe(document.body, { childList: true, subtree: true });
-    void sync();
+    locate();
     return () => { cancelled = true; observer.disconnect(); };
   }, []);
 
