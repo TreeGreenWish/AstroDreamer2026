@@ -128,14 +128,18 @@ export default function DreamAiRetryControls() {
   const handleInterpret = async () => {
     if (!dream?.id || !profile) return;
     const id = dream.id;
+    const previousInterpretedAt = dream.interpreted_at;
+    const isFreshInterpretation = (candidate: Dream) => Boolean(candidate.interpretation)
+      && (candidate.analysis_version || 0) >= 3
+      && candidate.interpreted_at !== previousInterpretedAt;
     setInterpretState('working'); setMessage('');
     let workingDream = dream;
     try {
       workingDream = await persistDream({ ...dream, interpretation_error: undefined, enrichment_status: dream.interpretation ? dream.enrichment_status : 'interpreting' } as Dream);
-      const result = await interpretDream(workingDream, profile);
-      const fresh = await pollDream(id, d => Boolean(d.interpretation) && (d.analysis_version || 0) >= 2);
-      if (fresh?.interpretation && (fresh.analysis_version || 0) >= 2) {
-        setInterpretState('success'); setMessage('Interpretation and exact ephemeris enrichment are saved.'); revealPersistedResult(fresh); return;
+      const result = await interpretDream(workingDream, profile, { force: Boolean(dream.interpretation) });
+      const fresh = await pollDream(id, isFreshInterpretation);
+      if (fresh && isFreshInterpretation(fresh)) {
+        setInterpretState('success'); setMessage(dream.interpretation ? 'A new interpretation was generated and saved.' : 'Interpretation and exact ephemeris enrichment are saved.'); revealPersistedResult(fresh); return;
       }
       if (result?.pending) {
         const savedError = fresh?.interpretation_error || result?.error || '';
@@ -150,9 +154,9 @@ export default function DreamAiRetryControls() {
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Interpretation failed';
       try {
-        const fresh = await pollDream(id, d => Boolean(d.interpretation) && (d.analysis_version || 0) >= 2, 4, 1000);
-        if (fresh?.interpretation && (fresh.analysis_version || 0) >= 2) {
-          setInterpretState('success'); setMessage('Interpretation completed and was saved successfully.'); revealPersistedResult(fresh); return;
+        const fresh = await pollDream(id, isFreshInterpretation, 4, 1000);
+        if (fresh && isFreshInterpretation(fresh)) {
+          setInterpretState('success'); setMessage('A new interpretation was generated and saved successfully.'); revealPersistedResult(fresh); return;
         }
         const savedError = fresh?.interpretation_error || text;
         if (isQuotaMessage(savedError)) { setInterpretState('quota'); setMessage('Gemini reported a quota or billing limit. Your dream is safely saved.'); return; }

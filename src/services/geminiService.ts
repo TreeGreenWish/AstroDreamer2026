@@ -31,8 +31,13 @@ export function generateProfileAnalysis(profile: UserProfile) {
   return postAi<any>("profile-analysis", { profile });
 }
 
-export function interpretDream(dream: Dream, userProfile: UserProfile) {
-  return postAi<any>("interpret-dream", { dream: withTimeZone(dream), userProfile, action: "interpret" });
+export function interpretDream(dream: Dream, userProfile: UserProfile, options: { force?: boolean } = {}) {
+  return postAi<any>("interpret-dream", {
+    dream: withTimeZone(dream),
+    userProfile,
+    action: "interpret",
+    force: options.force === true,
+  });
 }
 
 export function revisitDream(dream: Dream, userProfile: UserProfile) {
