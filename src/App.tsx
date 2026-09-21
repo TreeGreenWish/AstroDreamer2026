@@ -26,6 +26,19 @@ export default function App() {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    const handleDreamUpdated = (event: Event) => {
+      const updatedDream = (event as CustomEvent<{ dream?: Dream }>).detail?.dream;
+      if (!updatedDream?.id) return;
+
+      setDreams(currentDreams => currentDreams.map(dream => dream.id === updatedDream.id ? updatedDream : dream));
+      setSelectedDream(currentDream => currentDream?.id === updatedDream.id ? updatedDream : currentDream);
+    };
+
+    window.addEventListener('astradream:dream-updated', handleDreamUpdated);
+    return () => window.removeEventListener('astradream:dream-updated', handleDreamUpdated);
+  }, []);
+
   const fetchData = async () => {
     setLoading(true);
     try {

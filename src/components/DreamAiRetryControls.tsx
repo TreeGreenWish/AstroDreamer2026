@@ -108,7 +108,10 @@ export default function DreamAiRetryControls() {
     return latest;
   };
 
-  const revealPersistedResult = () => window.setTimeout(() => window.location.reload(), 350);
+  const revealPersistedResult = (fresh: Dream) => {
+    setDream(fresh);
+    window.dispatchEvent(new CustomEvent('astradream:dream-updated', { detail: { dream: fresh } }));
+  };
   const busy = interpretState === 'working' || imageState === 'working' || revisitState === 'working';
 
   const handleInterpret = async () => {
@@ -121,7 +124,7 @@ export default function DreamAiRetryControls() {
       const result = await interpretDream(workingDream, profile);
       const fresh = await pollDream(id, d => Boolean(d.interpretation) && (d.analysis_version || 0) >= 2);
       if (fresh?.interpretation && (fresh.analysis_version || 0) >= 2) {
-        setInterpretState('success'); setMessage('Interpretation and exact ephemeris enrichment are saved. Refreshing the dream…'); revealPersistedResult(); return;
+        setInterpretState('success'); setMessage('Interpretation and exact ephemeris enrichment are saved.'); revealPersistedResult(fresh); return;
       }
       if (result?.pending) {
         const savedError = fresh?.interpretation_error || result?.error || '';
@@ -138,7 +141,7 @@ export default function DreamAiRetryControls() {
       try {
         const fresh = await pollDream(id, d => Boolean(d.interpretation) && (d.analysis_version || 0) >= 2, 4, 1000);
         if (fresh?.interpretation && (fresh.analysis_version || 0) >= 2) {
-          setInterpretState('success'); setMessage('Interpretation completed and was saved successfully. Refreshing the dream…'); revealPersistedResult(); return;
+          setInterpretState('success'); setMessage('Interpretation completed and was saved successfully.'); revealPersistedResult(fresh); return;
         }
         const savedError = fresh?.interpretation_error || text;
         if (isQuotaMessage(savedError)) { setInterpretState('quota'); setMessage('Gemini reported a quota or billing limit. Your dream is safely saved.'); return; }
@@ -158,10 +161,10 @@ export default function DreamAiRetryControls() {
       if (imageUrl) {
         await persistDream({ ...workingDream, image_url: imageUrl, image_generated_at: new Date().toISOString(), image_error: undefined, enrichment_status: workingDream.interpretation ? 'complete' : workingDream.enrichment_status } as Dream);
         const fresh = await pollDream(id, d => Boolean(d.image_url), 4, 1000);
-        if (fresh?.image_url) { setImageState('success'); setMessage('Dream image generated and saved. Refreshing the dream…'); revealPersistedResult(); return; }
+        if (fresh?.image_url) { setImageState('success'); setMessage('Dream image generated and saved.'); revealPersistedResult(fresh); return; }
       }
       const fresh = await pollDream(id, d => Boolean(d.image_url), 6, 1500);
-      if (fresh?.image_url) { setImageState('success'); setMessage('Dream image generated and saved. Refreshing the dream…'); revealPersistedResult(); return; }
+      if (fresh?.image_url) { setImageState('success'); setMessage('Dream image generated and saved.'); revealPersistedResult(fresh); return; }
       const savedError = fresh?.image_error || '';
       if (isQuotaMessage(savedError)) { setImageState('quota'); setMessage('Gemini reported a quota or billing limit. Your dream is safely saved and you can retry the image later.'); }
       else { setImageState('pending'); setMessage('The image request was accepted but no final image is saved yet.'); }
@@ -169,7 +172,7 @@ export default function DreamAiRetryControls() {
       const text = error instanceof Error ? error.message : 'Image generation failed';
       try {
         const fresh = await pollDream(id, d => Boolean(d.image_url), 4, 1000);
-        if (fresh?.image_url) { setImageState('success'); setMessage('Dream image generated and saved. Refreshing the dream…'); revealPersistedResult(); return; }
+        if (fresh?.image_url) { setImageState('success'); setMessage('Dream image generated and saved.'); revealPersistedResult(fresh); return; }
         const savedError = fresh?.image_error || text;
         if (isQuotaMessage(savedError)) { setImageState('quota'); setMessage('Gemini reported a quota or billing limit. Your dream is safely saved.'); return; }
       } catch { /* preserve original error */ }
@@ -185,8 +188,8 @@ export default function DreamAiRetryControls() {
     try {
       await revisitDream(dream, profile);
       const fresh = await pollDream(id, d => (d.revisits?.length || 0) > previousCount, 6, 1200);
-      if ((fresh?.revisits?.length || 0) > previousCount) {
-        setRevisitState('success'); setMessage('New context saved. The original interpretation is preserved and a new revisit was added. Refreshing…'); revealPersistedResult(); return;
+      if (fresh && (fresh.revisits?.length || 0) > previousCount) {
+        setRevisitState('success'); setMessage('New context saved. The original interpretation is preserved and a new revisit was added.'); revealPersistedResult(fresh); return;
       }
       setRevisitState('pending'); setMessage('The revisit was accepted but has not appeared in the saved dream yet.');
     } catch (error) {
