@@ -869,6 +869,7 @@ function FeedView({
 function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) => void }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTag, setSelectedTag] = useState('All');
+  const [showAllSymbols, setShowAllSymbols] = useState(false);
   const [filter, setFilter] = useState({
     planet: 'All',
     sign: 'All',
@@ -889,6 +890,10 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
 
   // Get all unique tags
   const allTags = Array.from(new Set(dreams.flatMap(d => d.tags || []))).sort();
+  const hasMoreSymbols = allTags.length > 12;
+  const displayedTags = !showAllSymbols && selectedTag !== 'All'
+    ? [selectedTag, ...allTags.filter(tag => tag !== selectedTag)]
+    : allTags;
 
   const filteredDreams = dreams.filter(dream => {
     const searchMatch = 
@@ -982,6 +987,7 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
               setFilter({ planet: 'All', sign: 'All', moonPhase: 'All', dayNumber: 'All' });
               setSearchTerm('');
               setSelectedTag('All');
+              setShowAllSymbols(false);
             }}
             className="text-xs text-gold hover:text-gold/80 transition-colors mb-2 ml-auto"
           >
@@ -992,7 +998,10 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
         {allTags.length > 0 && (
           <div className="pt-4 border-t border-white/5">
             <label className="text-[10px] uppercase tracking-widest text-white/30 ml-1 mb-2 block">Filter by Symbols</label>
-            <div className="flex flex-wrap gap-2">
+            <div className={cn(
+              "flex flex-wrap gap-2",
+              hasMoreSymbols && !showAllSymbols && "max-h-[5.75rem] overflow-hidden"
+            )}>
               <button
                 onClick={() => setSelectedTag('All')}
                 className={cn(
@@ -1002,7 +1011,7 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
               >
                 All Symbols
               </button>
-              {allTags.map(tag => (
+              {displayedTags.map(tag => (
                 <button
                   key={tag}
                   onClick={() => setSelectedTag(tag)}
@@ -1015,6 +1024,16 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
                 </button>
               ))}
             </div>
+            {hasMoreSymbols && (
+              <button
+                type="button"
+                aria-expanded={showAllSymbols}
+                onClick={() => setShowAllSymbols(current => !current)}
+                className="mt-3 text-xs text-gold hover:text-gold/80 transition-colors"
+              >
+                {showAllSymbols ? 'Show less' : 'Show more'}
+              </button>
+            )}
           </div>
         )}
       </div>
