@@ -12,6 +12,8 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const OPEN_DREAM_STORAGE_KEY = 'astradream.open-dream-id.v1';
+
 export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [dreams, setDreams] = useState<Dream[]>([]);
@@ -26,6 +28,20 @@ export default function App() {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    const handleDreamUpdated = (event: Event) => {
+      const updatedDream = (event as CustomEvent<{ dream?: Dream }>).detail?.dream;
+      if (!updatedDream?.id) return;
+
+      window.sessionStorage.setItem(OPEN_DREAM_STORAGE_KEY, String(updatedDream.id));
+      setDreams(currentDreams => currentDreams.map(dream => dream.id === updatedDream.id ? updatedDream : dream));
+      setSelectedDream(currentDream => currentDream?.id === updatedDream.id ? updatedDream : currentDream);
+    };
+
+    window.addEventListener('astradream:dream-updated', handleDreamUpdated);
+    return () => window.removeEventListener('astradream:dream-updated', handleDreamUpdated);
+  }, []);
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -37,6 +53,13 @@ export default function App() {
       const dreamsData = await dreamsRes.json();
       setProfile(profileData);
       setDreams(dreamsData);
+
+      const rememberedDreamId = Number(window.sessionStorage.getItem(OPEN_DREAM_STORAGE_KEY));
+      if (Number.isFinite(rememberedDreamId)) {
+        const rememberedDream = dreamsData.find((dream: Dream) => dream.id === rememberedDreamId);
+        if (rememberedDream) setSelectedDream(rememberedDream);
+        else window.sessionStorage.removeItem(OPEN_DREAM_STORAGE_KEY);
+      }
 
       if (profileData) {
         const now = new Date();
@@ -133,6 +156,7 @@ export default function App() {
       const savedDream = { ...dreamWithAi, id };
       
       setDreams([savedDream, ...dreams]);
+      window.sessionStorage.setItem(OPEN_DREAM_STORAGE_KEY, String(savedDream.id));
       setSelectedDream(savedDream);
       setActiveTab('library');
     } catch (error) {
@@ -151,6 +175,7 @@ export default function App() {
         body: JSON.stringify(updatedDream)
       });
       setDreams(dreams.map(d => d.id === updatedDream.id ? updatedDream : d));
+      window.sessionStorage.setItem(OPEN_DREAM_STORAGE_KEY, String(updatedDream.id));
       setSelectedDream(updatedDream);
     } catch (error) {
       console.error('Failed to update dream:', error);
@@ -161,10 +186,23 @@ export default function App() {
     try {
       await fetch(`/api/dreams/${id}`, { method: 'DELETE' });
       setDreams(dreams.filter(d => d.id !== id));
-      if (selectedDream?.id === id) setSelectedDream(null);
+      if (selectedDream?.id === id) {
+        window.sessionStorage.removeItem(OPEN_DREAM_STORAGE_KEY);
+        setSelectedDream(null);
+      }
     } catch (error) {
       console.error('Failed to delete dream:', error);
     }
+  };
+
+  const handleSelectDream = (dream: Dream) => {
+    if (dream.id) window.sessionStorage.setItem(OPEN_DREAM_STORAGE_KEY, String(dream.id));
+    setSelectedDream(dream);
+  };
+
+  const handleCloseDream = () => {
+    window.sessionStorage.removeItem(OPEN_DREAM_STORAGE_KEY);
+    setSelectedDream(null);
   };
 
   if (loading && !profile && dreams.length === 0) {
@@ -202,7 +240,7 @@ export default function App() {
           {selectedDream ? (
             <DreamDetail 
               dream={selectedDream} 
-              onBack={() => setSelectedDream(null)} 
+              onBack={handleCloseDream}
               onDelete={() => handleDeleteDream(selectedDream.id!)}
               onUpdate={handleUpdateDream}
             />
@@ -215,9 +253,9 @@ export default function App() {
               transition={{ duration: 0.3 }}
             >
               {activeTab === 'journal' && <DreamJournal onSave={handleSaveDream} loading={loading} />}
-              {activeTab === 'feed' && <FeedView dreams={dreams} currentAstrology={currentAstrology} onSelect={setSelectedDream} insights={insights} />}
-              {activeTab === 'calendar' && <AstralCalendar dreams={dreams} events={monthlyEvents} onSelect={setSelectedDream} />}
-              {activeTab === 'library' && <Library dreams={dreams} onSelect={setSelectedDream} />}
+              {activeTab === 'feed' && <FeedView dreams={dreams} currentAstrology={currentAstrology} onSelect={handleSelectDream} insights={insights} />}
+              {activeTab === 'calendar' && <AstralCalendar dreams={dreams} events={monthlyEvents} onSelect={handleSelectDream} />}
+              {activeTab === 'library' && <Library dreams={dreams} onSelect={handleSelectDream} />}
               {activeTab === 'insights' && <InsightsView dreams={dreams} insights={insights} setInsights={setInsights} />}
               {activeTab === 'profile' && <ProfileView profile={profile} onEdit={() => setProfile(null)} />}
             </motion.div>
@@ -831,6 +869,7 @@ function FeedView({
 function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) => void }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTag, setSelectedTag] = useState('All');
+  const [showAllSymbols, setShowAllSymbols] = useState(false);
   const [filter, setFilter] = useState({
     planet: 'All',
     sign: 'All',
@@ -851,6 +890,10 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
 
   // Get all unique tags
   const allTags = Array.from(new Set(dreams.flatMap(d => d.tags || []))).sort();
+  const hasMoreSymbols = allTags.length > 12;
+  const displayedTags = !showAllSymbols && selectedTag !== 'All'
+    ? [selectedTag, ...allTags.filter(tag => tag !== selectedTag)]
+    : allTags;
 
   const filteredDreams = dreams.filter(dream => {
     const searchMatch = 
@@ -944,6 +987,7 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
               setFilter({ planet: 'All', sign: 'All', moonPhase: 'All', dayNumber: 'All' });
               setSearchTerm('');
               setSelectedTag('All');
+              setShowAllSymbols(false);
             }}
             className="text-xs text-gold hover:text-gold/80 transition-colors mb-2 ml-auto"
           >
@@ -954,7 +998,10 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
         {allTags.length > 0 && (
           <div className="pt-4 border-t border-white/5">
             <label className="text-[10px] uppercase tracking-widest text-white/30 ml-1 mb-2 block">Filter by Symbols</label>
-            <div className="flex flex-wrap gap-2">
+            <div className={cn(
+              "flex flex-wrap gap-2",
+              hasMoreSymbols && !showAllSymbols && "max-h-[5.75rem] overflow-hidden"
+            )}>
               <button
                 onClick={() => setSelectedTag('All')}
                 className={cn(
@@ -964,7 +1011,7 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
               >
                 All Symbols
               </button>
-              {allTags.map(tag => (
+              {displayedTags.map(tag => (
                 <button
                   key={tag}
                   onClick={() => setSelectedTag(tag)}
@@ -977,6 +1024,16 @@ function Library({ dreams, onSelect }: { dreams: Dream[], onSelect: (d: Dream) =
                 </button>
               ))}
             </div>
+            {hasMoreSymbols && (
+              <button
+                type="button"
+                aria-expanded={showAllSymbols}
+                onClick={() => setShowAllSymbols(current => !current)}
+                className="mt-3 text-xs text-gold hover:text-gold/80 transition-colors"
+              >
+                {showAllSymbols ? 'Show less' : 'Show more'}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1231,7 +1288,7 @@ function DreamDetail({ dream, onBack, onDelete, onUpdate }: { dream: Dream, onBa
           </div>
         ) : (
           <>
-            <div className="space-y-2">
+            <div className="space-y-2" data-dream-detail-id={dream.id}>
               <h2 className="text-5xl font-serif text-white">{dream.title}</h2>
               <div className="flex flex-wrap gap-4 text-xs font-mono text-white/30 uppercase tracking-widest">
                 <span>{format(new Date(dream.date), 'MMMM d, yyyy')}</span>

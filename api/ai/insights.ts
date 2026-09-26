@@ -1,0 +1,38 @@
+import { getCached, hashObject, setCached } from "../../src/server/aiCache.js";
+import { logAiCacheHit, meterEstimatedCall } from "../../src/server/aiUsage.js";
+import { buildInsightEvidence } from "../../src/server/insightEvidence.js";
+import { interpretInsightEvidence } from "../../src/server/insightInterpreter.js";
+import { requireAuthenticatedUser } from "../../src/server/requestAuth.js";
+
+export const config = { maxDuration: 300 };
+const MODEL = "gemini-3-flash-preview";
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  try {
+    const user = await requireAuthenticatedUser(req);
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const dreams = Array.isArray(body.dreams) ? body.dreams : [];
+    const evidence = buildInsightEvidence(dreams);
+    const cacheKey = `user:${user.id}:insights-evidence-v2:${hashObject(evidence)}`;
+    const cached = await getCached<string[]>(cacheKey);
+    if (cached) {
+      await logAiCacheHit(user.id, "insights", MODEL, { evidence_version: 2 });
+      return res.status(200).json(cached);
+    }
+    const insights = await meterEstimatedCall({
+      userId: user.id,
+      operation: "insights",
+      model: MODEL,
+      input: evidence,
+      execute: () => interpretInsightEvidence(evidence),
+      metadata: { evidence_version: 2, dream_count: evidence.total_dreams },
+    });
+    await setCached(cacheKey, "insights-evidence-v2", insights, null);
+    return res.status(200).json(insights);
+  } catch (error: any) {
+    console.error("Insight generation failed", error);
+    const status = Number(error?.status || 500);
+    return res.status(status).json({ error: error instanceof Error ? error.message : "Insight generation failed", code: error?.code });
+  }
+}
